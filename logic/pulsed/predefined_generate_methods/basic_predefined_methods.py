@@ -1329,3 +1329,257 @@ class BasicPredefinedGenerator(PredefinedGeneratorBase):
         # append ensemble to created ensembles
         created_ensembles.append(block_ensemble)
         return created_blocks, created_ensembles, created_sequences
+
+
+    def generate_t1_contrast(self, name='T1_contrast_based', tau_start=1.0e-6, tau_step=1.0e-6,
+                    num_of_points=50, alternating=False):  #JSS: added
+        """
+
+        """
+        created_blocks = list()
+        created_ensembles = list()
+        created_sequences = list()
+
+        # get tau array for measurement ticks
+        tau_array = tau_start + np.arange(num_of_points) * tau_step
+
+        # create the elements
+        waiting_element = self._get_laser_element(length=self.wait_time,
+                                                     increment=0)
+        laser_element = self._get_laser_gate_element(length=self.laser_length/2,
+                                                     increment=0)
+        laser_only_element = self._get_laser_element(length=self.laser_length/2,
+                                                     increment=0)
+        delay_element = self._get_laser_element(length=self.laser_delay,
+                                                     increment=0)
+        if alternating:  # get pi element
+            pi_element = self._get_mw_element(length=self.rabi_period / 2,
+                                              increment=0,
+                                              amp=self.microwave_amplitude,
+                                              freq=self.microwave_frequency,
+                                              phase=0)
+
+        tau_element = self._get_idle_element(length=tau_start, increment=tau_step)
+        t1_block = PulseBlock(name=name)
+
+        t1_block.append(waiting_element)
+        t1_block.append(laser_element)
+        t1_block.append(laser_only_element)
+        t1_block.append(laser_element)
+
+        t1_block.append(tau_element)
+
+        t1_block.append(delay_element)
+        t1_block.append(laser_element)
+        t1_block.append(laser_only_element)
+        t1_block.append(laser_element)
+
+        if alternating:
+            print("Alternating not yet implemented")
+            #t1_block.append(pi_element)
+            #t1_block.append(tau_element)
+            #t1_block.append(laser_element)
+            #t1_block.append(delay_element)
+            #t1_block.append(waiting_element)
+        created_blocks.append(t1_block)
+
+        # Create block ensemble
+        block_ensemble = PulseBlockEnsemble(name=name, rotating_frame=False)
+        block_ensemble.append((t1_block.name, num_of_points - 1))
+
+        # Create and append sync trigger block if needed
+        self._add_trigger(created_blocks=created_blocks, block_ensemble=block_ensemble)
+
+        # add metadata to invoke settings later on
+        number_of_lasers = 2 * num_of_points if alternating else num_of_points
+        block_ensemble.measurement_information['alternating'] = alternating
+        block_ensemble.measurement_information['laser_ignore_list'] = list()
+        block_ensemble.measurement_information['controlled_variable'] = tau_array
+        block_ensemble.measurement_information['units'] = ('s', '')
+        block_ensemble.measurement_information['labels'] = ('Tau<sub>pulse spacing</sub>', 'Signal')
+        block_ensemble.measurement_information['number_of_lasers'] = number_of_lasers
+        block_ensemble.measurement_information['counting_length'] = self._get_ensemble_count_length(
+            ensemble=block_ensemble, created_blocks=created_blocks)
+        # append ensemble to created ensembles
+        created_ensembles.append(block_ensemble)
+        return created_blocks, created_ensembles, created_sequences
+
+
+
+    def generate_t1_exponential_contrast(self, name='T1_exp_contrastbased', tau_start=1.0e-6, tau_end=1.0e-6,
+                                num_of_points=50, alternating=False):
+        """
+
+        """
+        created_blocks = list()
+        created_ensembles = list()
+        created_sequences = list()
+
+        log_max = np.log10(tau_end)
+        # get tau array for measurement ticks
+        if tau_start == 0.0:
+            log_min = np.log10(1e-9)
+            tau_array = np.logspace(log_min, log_max, num=num_of_points - 1, base=10.0, dtype=float) #np.geomspace(1e-9, tau_end, num_of_points - 1)
+            tau_array = np.insert(tau_array, 0, 0.0)
+        else:
+            log_min = np.log10(tau_start)  # Taking log base 10 of uw_min
+            tau_array = np.logspace(log_min, log_max, num=num_of_points, base=10.0, dtype=float) #tau_array = np.geomspace(tau_start, tau_end, num_of_points)
+
+        # create the elements
+        waiting_element = self._get_laser_element(length=self.wait_time,
+                                                      increment=0)
+        laser_element = self._get_laser_gate_element(length=self.laser_length / 2,
+                                                         increment=0)
+        laser_only_element = self._get_laser_element(length=self.laser_length / 2,
+                                                         increment=0)
+        delay_element = self._get_laser_element(length=self.laser_delay,
+                                                    increment=0)
+
+        start_element = self._get_idle_element(length=300e-9, increment=0.0)
+        if alternating:  # get pi element
+                pi_element = self._get_mw_element(length=self.rabi_period / 2,
+                                                  increment=0,
+                                                  amp=self.microwave_amplitude,
+                                                  freq=self.microwave_frequency,
+                                                  phase=0)
+
+
+        t1_block = PulseBlock(name=name)
+        for tau in tau_array:
+            tau_element = self._get_idle_element(length=tau, increment=0.0)
+
+            t1_block.append(start_element) #JSS: forgot this one, but why would it make any difference
+            t1_block.append(waiting_element)
+            t1_block.append(laser_element)
+            t1_block.append(laser_only_element)
+            t1_block.append(laser_element)
+
+            t1_block.append(tau_element)
+
+            t1_block.append(delay_element)
+            t1_block.append(laser_element)
+            t1_block.append(laser_only_element)
+            t1_block.append(laser_element)
+            t1_block.append(delay_element)  #JSS: forgot this one, but why would it make any difference
+
+            if alternating:
+                print("Alternating not yet implemented")
+                # t1_block.append(pi_element)
+                # t1_block.append(tau_element)
+                # t1_block.append(laser_element)
+                # t1_block.append(delay_element)
+                # t1_block.append(waiting_element)
+        created_blocks.append(t1_block)
+
+        # Create block ensemble
+        block_ensemble = PulseBlockEnsemble(name=name, rotating_frame=False)
+        block_ensemble.append((t1_block.name, 0))
+
+        # Create and append sync trigger block if needed
+        self._add_trigger(created_blocks=created_blocks, block_ensemble=block_ensemble)
+
+        # add metadata to invoke settings later on
+        number_of_lasers = 2 * num_of_points if alternating else num_of_points
+        block_ensemble.measurement_information['alternating'] = alternating
+        block_ensemble.measurement_information['laser_ignore_list'] = list()
+        block_ensemble.measurement_information['controlled_variable'] = tau_array
+        block_ensemble.measurement_information['units'] = ('s', '')
+        block_ensemble.measurement_information['labels'] = ('Tau<sub>pulse spacing</sub>', 'Signal')
+        block_ensemble.measurement_information['number_of_lasers'] = number_of_lasers
+        block_ensemble.measurement_information['counting_length'] = self._get_ensemble_count_length(
+            ensemble=block_ensemble, created_blocks=created_blocks)
+        # append ensemble to created ensembles
+        created_ensembles.append(block_ensemble)
+        return created_blocks, created_ensembles, created_sequences
+
+
+    def generate_t1_exponential_contrast_random(self, name='T1_exp_contrastbased', tau_start=1.0e-6, tau_end=1.0e-6,
+                                num_of_points=50, alternating=False):
+        """
+
+        """
+        created_blocks = list()
+        created_ensembles = list()
+        created_sequences = list()
+
+        log_max = np.log10(tau_end)
+        # get tau array for measurement ticks
+        if tau_start == 0.0:
+            log_min = np.log10(1e-9)
+            tau_array = np.logspace(log_min, log_max, num=num_of_points - 1, base=10.0, dtype=float) #np.geomspace(1e-9, tau_end, num_of_points - 1)
+            tau_array = np.insert(tau_array, 0, 0.0)
+        else:
+            log_min = np.log10(tau_start)  # Taking log base 10 of uw_min
+            tau_array = np.logspace(log_min, log_max, num=num_of_points, base=10.0, dtype=float) #tau_array = np.geomspace(tau_start, tau_end, num_of_points)
+
+        rng = np.random.default_rng(42)
+        permutation = rng.permutation(len(tau_array))
+
+        tau_array = tau_array[permutation]
+        print("permutation:", permutation)
+        # create the elements
+        waiting_element = self._get_laser_element(length=self.wait_time,
+                                                      increment=0)
+        laser_element = self._get_laser_gate_element(length=self.laser_length / 2,
+                                                         increment=0)
+        laser_only_element = self._get_laser_element(length=self.laser_length / 2,
+                                                         increment=0)
+        delay_element = self._get_laser_element(length=self.laser_delay,
+                                                    increment=0)
+
+        start_element = self._get_idle_element(length=300e-9, increment=0.0)
+        if alternating:  # get pi element
+                pi_element = self._get_mw_element(length=self.rabi_period / 2,
+                                                  increment=0,
+                                                  amp=self.microwave_amplitude,
+                                                  freq=self.microwave_frequency,
+                                                  phase=0)
+
+
+        t1_block = PulseBlock(name=name)
+        for tau in tau_array:
+            tau_element = self._get_idle_element(length=tau, increment=0.0)
+
+            t1_block.append(start_element) #JSS: forgot this one, but why would it make any difference
+            t1_block.append(waiting_element)
+            t1_block.append(laser_element)
+            t1_block.append(laser_only_element)
+            t1_block.append(laser_element)
+
+            t1_block.append(tau_element)
+
+            t1_block.append(delay_element)
+            t1_block.append(laser_element)
+            t1_block.append(laser_only_element)
+            t1_block.append(laser_element)
+            t1_block.append(delay_element)  #JSS: forgot this one, but why would it make any difference
+
+            if alternating:
+                print("Alternating not yet implemented")
+                # t1_block.append(pi_element)
+                # t1_block.append(tau_element)
+                # t1_block.append(laser_element)
+                # t1_block.append(delay_element)
+                # t1_block.append(waiting_element)
+        created_blocks.append(t1_block)
+
+        # Create block ensemble
+        block_ensemble = PulseBlockEnsemble(name=name, rotating_frame=False)
+        block_ensemble.append((t1_block.name, 0))
+
+        # Create and append sync trigger block if needed
+        self._add_trigger(created_blocks=created_blocks, block_ensemble=block_ensemble)
+
+        # add metadata to invoke settings later on
+        number_of_lasers = 2 * num_of_points if alternating else num_of_points
+        block_ensemble.measurement_information['alternating'] = alternating
+        block_ensemble.measurement_information['laser_ignore_list'] = list()
+        block_ensemble.measurement_information['controlled_variable'] = tau_array
+        block_ensemble.measurement_information['units'] = ('s', '')
+        block_ensemble.measurement_information['labels'] = ('Tau<sub>pulse spacing</sub>', 'Signal')
+        block_ensemble.measurement_information['number_of_lasers'] = number_of_lasers
+        block_ensemble.measurement_information['counting_length'] = self._get_ensemble_count_length(
+            ensemble=block_ensemble, created_blocks=created_blocks)
+        # append ensemble to created ensembles
+        created_ensembles.append(block_ensemble)
+        return created_blocks, created_ensembles, created_sequences

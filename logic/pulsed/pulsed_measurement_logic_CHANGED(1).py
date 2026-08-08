@@ -68,7 +68,6 @@ class PulsedMeasurementLogic(GenericLogic):
     __fast_counter_record_length = StatusVar(default=3.0e-6)
     __fast_counter_binwidth = StatusVar(default=1.0e-9)
     __fast_counter_gates = StatusVar(default=0)
-    __fast_counter_stop_sweep = StatusVar(default=0) #Pratik: stop sweep
 
     # measurement timer settings
     __timer_interval = StatusVar(default=5)
@@ -127,7 +126,6 @@ class PulsedMeasurementLogic(GenericLogic):
         self.__start_time = 0
         self.__elapsed_time = 0
         self.__elapsed_sweeps = 0
-        self.__stop_requested = False #JSS: stop sweep
 
         # threading
         self._threadlock = Mutex()
@@ -178,8 +176,26 @@ class PulsedMeasurementLogic(GenericLogic):
         if 'fits' in self._statusVariables and isinstance(self._statusVariables.get('fits'), dict):
             self.fc.load_from_dict(self._statusVariables['fits'])
 
+        if not self.fc.fit_list:
+            default_fits = {
+                '1d': {
+                    'Sine': {
+                        'fit_function': 'sine',
+                        'estimator': 'generic'
+                    },
+                    'Linear': {
+                        'fit_function': 'linear',
+                        'estimator': 'generic'
+                    }
+                }
+            }
+            #print(default_fits)
+            self.fc.load_from_dict(default_fits)
+
         # Turn off pulse generator
         self.pulse_generator_off()
+        self.stop_measurement = True  #JSS: added
+
 
         # Check and configure fast counter
         binning_constraints = self.fastcounter().get_constraints()['hardware_binwidth_list']
@@ -189,7 +205,7 @@ class PulsedMeasurementLogic(GenericLogic):
             self.__fast_counter_record_length = 3e-6
         self.fast_counter_off()
         # Set default number of gates to a reasonable number for gated counters (>0 if gated)
-        if self.fastcounter().is_gated() and self.__fast_counter_gates < 1:
+        if self.fastcounter().is_gated(): #and self.__fast_counter_gates < 1: #JSS: I dont like the other part, it hinders from passing the _number_of_lasers value to the __fast_counter_gates #JSS: not sure CHECK THIS!!
             self.__fast_counter_gates = max(1, self._number_of_lasers)
         self.set_fast_counter_settings()
 
@@ -241,7 +257,6 @@ class PulsedMeasurementLogic(GenericLogic):
         settings_dict['bin_width'] = float(self.__fast_counter_binwidth)
         settings_dict['record_length'] = float(self.__fast_counter_record_length)
         settings_dict['number_of_gates'] = int(self.__fast_counter_gates)
-        settings_dict['stop_sweep'] = int(self.__fast_counter_stop_sweep) #Pratik: stop sweep
         settings_dict['is_gated'] = bool(self.fastcounter().is_gated())
         return settings_dict
 
@@ -286,18 +301,13 @@ class PulsedMeasurementLogic(GenericLogic):
                     self.__fast_counter_gates = int(settings_dict['number_of_gates'])
                 else:
                     self.__fast_counter_gates = 0
-            if 'stop_sweep' in settings_dict: #Pratik: stop sweep
-                self.__fast_counter_stop_sweep = int(settings_dict['stop_sweep'])
 
             # Apply the settings to hardware
             self.__fast_counter_binwidth, \
             self.__fast_counter_record_length, \
-            self.__fast_counter_gates, \
-            self.__fast_counter_stop_sweep = self.fastcounter().configure( #Pratik: stop sweep
-                                                self.__fast_counter_binwidth,
-                                                self.__fast_counter_record_length,
-                                                self.__fast_counter_gates,
-                                                self.__fast_counter_stop_sweep) #Pratik: stop sweep
+            self.__fast_counter_gates = self.fastcounter().configure(self.__fast_counter_binwidth,
+                                                                     self.__fast_counter_record_length,
+                                                                     self.__fast_counter_gates)
         else:
             self.log.warning('Fast counter is not idle (status: {0}).\n'
                              'Unable to apply new settings.'.format(counter_status))
@@ -338,6 +348,7 @@ class PulsedMeasurementLogic(GenericLogic):
 
         @return int: error code (0:OK, -1:error)
         """
+        print("fast_counter_pause")
         return self.fastcounter().pause_measure()
 
     def fast_counter_continue(self):
@@ -345,6 +356,7 @@ class PulsedMeasurementLogic(GenericLogic):
 
         @return int: error code (0:OK, -1:error)
         """
+        print("fast_counter_continue")
         return self.fastcounter().continue_measure()
 
     @QtCore.Slot(bool)
@@ -758,9 +770,9 @@ class PulsedMeasurementLogic(GenericLogic):
     @QtCore.Slot(str)
     def start_pulsed_measurement(self, stashed_raw_data_tag=''):
         """Start the analysis loop."""
+        print("pm logic:start_pulsed_measurement")
         self.sigMeasurementStatusUpdated.emit(True, False)
-        self.__stop_requested = False  # JSS: stop sweep
-
+        self.stop_measurement = False #JSS: added
         # Check if measurement settings need to be invoked
         if self._invoke_settings_from_sequence:
             if self._measurement_information:
@@ -825,17 +837,21 @@ class PulsedMeasurementLogic(GenericLogic):
         """
         Stop the measurement
         """
+
         # Get raw data and analyze it a last time just before stopping the measurement.
-        #try:  #JSS: mudiadhu poda
-        #    self._pulsed_analysis_loop()
-        #except:
-        #    pass
+
+        self.stop_measurement = True  #JSS added now
+        try:
+            self._pulsed_analysis_loop()
+        except:
+            pass
 
         with self._threadlock:
             if self.module_state() == 'locked':
                 # stopping the timer
                 self.sigStopTimer.emit()
                 # Turn off fast counter
+                print("stop_pulsed_measurement is indeed invoked")
                 self.fast_counter_off()
                 # Turn off pulse generator
                 self.pulse_generator_off()
@@ -898,7 +914,7 @@ class PulsedMeasurementLogic(GenericLogic):
         return
 
     @QtCore.Slot()
-    def continue_pulsed_measurement(self):
+    def continue_pulsed_measurement(self): #JSS: pending, havent really cared for this pause/continue  JSS: but I think its working fine
         """
         Continues the measurement
         """
@@ -1110,14 +1126,18 @@ class PulsedMeasurementLogic(GenericLogic):
         """ Acquires laser pulses from fast counter,
             calculates fluorescence signal and creates plots.
         """
+        print("pm_logic: p analysis loop")
+
         with self._threadlock:
             if self.module_state() == 'locked':
                 # Update elapsed time
 
                 self._extract_laser_pulses()
+                self.fast_counter_pause() #JSS: added
+                self.pulse_generator_off() #JSS: added
+                #self.pause_pulsed_measurement()  #JSS: added
 
                 tmp_signal, tmp_error = self._analyze_laser_pulses()
-
                 # exclude laser pulses to ignore
                 if len(self._laser_ignore_list) > 0:
                     # Convert relative negative indices into absolute positive indices
@@ -1151,24 +1171,18 @@ class PulsedMeasurementLogic(GenericLogic):
                 self._compute_alt_data()
 
             # emit signals
-            self.sigTimerUpdated.emit(self.__elapsed_time, self.__elapsed_sweeps,
-                                      self.__timer_interval)
-            self.sigMeasurementDataUpdated.emit()
+            self.sigTimerUpdated.emit(self.__elapsed_time, self.__elapsed_sweeps,  #JSS: Check this!! Should i indented (push into if statement) these two,
+                                      self.__timer_interval)                       #coz this method runs once even after "stop", while the above "if" statement alone luckily doesnt execute...
+            self.sigMeasurementDataUpdated.emit() #JSS: Should i indent?
+            print("self.module_state() == locked in _pulsed_analysis_loop")
 
-            #JSS: stop sweep
-            print("stop_sweep", self.__fast_counter_stop_sweep,
-                  "elapsed_sweeps", self.elapsed_sweeps)
-
-            if (self.__fast_counter_stop_sweep > 0
-                    and self.elapsed_sweeps >= self.__fast_counter_stop_sweep
-                    and not self.__stop_requested):
-                self.__stop_requested = True
-
-                print("Automatic stop requested")
-                def delayed_stop():
-                    self.stop_pulsed_measurement()
-                QtCore.QTimer.singleShot(0, delayed_stop)
-
+            if self.stop_measurement == False: #JSS: ADDED
+                self.fast_counter_continue() #JSS: added
+                self.pulse_generator_on() #JSS: added
+                #self.continue_pulsed_measurement()  #JSS: added
+            else:
+                print("_pulsed_analysis_loop: measurement stopped before this")
+                #return
 
             return
 
@@ -1196,6 +1210,7 @@ class PulsedMeasurementLogic(GenericLogic):
         return tmp_signal, tmp_error
 
     def _get_raw_data(self):
+        print("pm_logic: _get_raw_data")
         """
         Get the raw count data from the fast counting hardware and perform sanity checks.
         Also add recalled raw data to the newly received data.
@@ -1260,13 +1275,16 @@ class PulsedMeasurementLogic(GenericLogic):
 
         number_of_bins = int(self.__fast_counter_record_length / self.__fast_counter_binwidth)
         laser_length = number_of_bins if self.__fast_counter_gates > 0 else 500
-        self.laser_data = np.zeros((self._number_of_lasers, laser_length), dtype='int64')
+
+        #JSS: pending: the following should be generalized, i.e. depending on the type of fast counter connected (NI Vs real fast counters), the laser_length value should be replaced
+        self.laser_data = np.zeros((self._number_of_lasers,      1), dtype='int64') #, laser_length), dtype='int64') #JSS: changed to get rid of MemoryError. Coz I need __fast_counter_record_length as intager
 
         if self.__fast_counter_gates > 0:
-            self.raw_data = np.zeros((self._number_of_lasers, number_of_bins), dtype='int64')
+            self.raw_data = np.zeros((self._number_of_lasers,       1), dtype='int64') #, number_of_bins), dtype='int64')  #JSS: changed for same reason
         else:
-            self.raw_data = np.zeros(number_of_bins, dtype='int64')
+            self.raw_data = np.zeros( 1, dtype='int64') #number_of_bins, dtype='int64') #JSS: changed for same reason
 
+        self.sigMeasurementDataUpdated.emit()
         self.sigMeasurementDataUpdated.emit()
         return
 
@@ -1645,6 +1663,3 @@ class PulsedMeasurementLogic(GenericLogic):
             self.signal_alt_data = np.zeros(self.signal_data.shape, dtype=float)
             self.signal_alt_data[0] = self.signal_data[0]
         return
-
-
-

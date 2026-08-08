@@ -275,6 +275,6 @@ class MicrowaveDummy(Base, MicrowaveInterface):
         Ensure that the Frequency was set AFTER the function returns, or give
         the function at least a save waiting time.
         """
-
+        print("yay dummy MW trigerred")
         time.sleep(self._FREQ_SWITCH_SPEED)  # that is the switching speed
         return

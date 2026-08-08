@@ -236,3 +236,52 @@ class BasicPulseAnalyzer(PulseAnalyzerBase):
             error_data[ii] = signal_data[ii] * np.sqrt(1 / abs(signal_sum) + 1 / abs(reference_sum))
 
         return signal_data, error_data
+
+    def analyse_NI_contrast(self, laser_data): #JSS
+        """
+        This method will break the laser data into a matrix where each row corresponds to one sweep.
+        Then it averages over them to get the mean sweep data, and calculates the contrast from there.
+        Need to be used in combination with the extractor: gated_NI_laser_extractor
+        Error propagation has been handled after being analytically derived.
+        """
+        number_of_gates = self.fast_counter_settings['number_of_gates']
+        number_of_gates *= 2
+        print("analyse_NI_contrast number_of_gates", number_of_gates)
+        ACQtime = int(len(laser_data)/number_of_gates)
+        Laser = laser_data.reshape(ACQtime, number_of_gates)
+        LaserSum = np.sum(Laser, axis=0)
+        print("LaserSum", LaserSum, len(LaserSum))
+        LaserSum_std = np.std(Laser, axis=0)
+        print("LaserSum_std", LaserSum_std, len(LaserSum_std))
+
+        c_on = LaserSum[1::2]  # post dark time readout
+        c_off = LaserSum[0::2]  # polarisation readout
+
+        c_on_std = LaserSum_std[1::2]
+        c_off_std = LaserSum_std[0::2]
+
+        numerator = (c_on - c_off)
+        denominator = (c_on + c_off)
+        num_den_std = np.sqrt(c_on_std**2 + c_off_std**2)
+
+        numerator_inv = np.divide(
+                    1,
+                    numerator,
+                    out=np.zeros_like(numerator, dtype=float),
+                    where=numerator != 0)
+        denominator_inv = np.divide(
+                    1,
+                    denominator,
+                    out=np.zeros_like(denominator, dtype=float),
+                    where=denominator != 0)
+
+        contrast = numerator * denominator_inv
+        error_contrast = np.sqrt(ACQtime) * np.abs(contrast) * num_den_std * (np.abs(numerator_inv) + np.abs(denominator_inv))
+        contrast += 1
+
+        if len(np.shape(contrast)) > 1:
+            data = np.mean(contrast, axis=1)
+        else:
+            data = np.ravel(contrast)
+        return data, error_contrast
+

@@ -25,6 +25,9 @@ from logic.generic_logic import GenericLogic
 from qtpy import QtCore
 import numpy as np
 
+#JSS: added the following for the sake of saving data from here
+import datetime
+from collections import OrderedDict
 
 class PulsedMasterLogic(GenericLogic):
     """
@@ -603,6 +606,67 @@ class PulsedMasterLogic(GenericLogic):
         """
         self.pulsedmeasurementlogic().save_measurement_data(tag, with_error, save_laser_pulses, save_pulsed_measurement,
                                                             save_figure)
+
+
+
+        #JSS: following added to save photon rate
+        filepath = self.pulsedmeasurementlogic().savelogic().get_path_for_module('PulsedMeasurement')
+        timestamp = datetime.datetime.now()
+
+        #######################################################################
+        ### Save photon rate for c_on anf c_off from extracted laser pulses ###
+        ####           (along with the contrast side by side)            ######
+        #######################################################################
+
+        #JSS: pending the following might throw an error if any real fastcounter (Timetagger) is run
+        if self.pulsedmeasurementlogic().fastcounter()._contrast_based == False:
+            return
+
+        if save_laser_pulses:
+            if tag:
+                filelabel = tag + '_contrast_photon_rate'
+            else:
+                filelabel = 'contrast_photon_rate'
+
+            # use the data dict already created in above pulsedmeasurementlogic function:
+            data_contrast = self.pulsedmeasurementlogic().data_contrast
+            header = self.pulsedmeasurementlogic().header_str
+            data = OrderedDict()
+
+            #print("self.laser_data inside save data", self.pulsedmeasurementlogic().laser_data)
+            laser_trace = self.pulsedmeasurementlogic().laser_data
+            number_of_gates = self.fast_counter_settings['number_of_gates']
+            number_of_gates *= 2
+            ACQtime = int(len(laser_trace) / number_of_gates)
+            laser_trace = laser_trace.reshape(ACQtime, number_of_gates)
+            laser_trace = np.sum(laser_trace, axis=0)
+
+            readout_time = self.generation_parameters['laser_length']
+            readout_time *= self.fast_counter_settings['record_length']
+
+            photon_rate = laser_trace/readout_time/1000 #photon rate (k/s)
+
+            c_off = photon_rate[::2].reshape(-1, 1)
+            c_on = photon_rate[1::2].reshape(-1, 1)
+            header += '\tc_on(k/s)' + '\tc_off(k/s)'
+            data_contrast = np.concatenate((data_contrast, c_on, c_off), axis=1)
+            data[header] = data_contrast
+
+            # write the parameters:
+            parameters = OrderedDict()
+            parameters['bin width (s)'] = self.fast_counter_settings['bin_width']
+            parameters['record length (s)'] = self.fast_counter_settings['record_length']
+            parameters['gated counting'] = self.fast_counter_settings['is_gated']
+            parameters['extraction parameters'] = self.pulsedmeasurementlogic().extraction_settings
+
+            self.pulsedmeasurementlogic().savelogic().save_data(data,
+                                       timestamp=timestamp,
+                                       parameters=parameters,
+                                       filepath=filepath,
+                                       filelabel=filelabel,
+                                       filetype='text',
+                                       fmt='%.15e',
+                                       delimiter='\t')
         return
 
     #######################################################################

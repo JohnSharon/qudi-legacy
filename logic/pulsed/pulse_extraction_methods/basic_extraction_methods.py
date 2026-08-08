@@ -427,3 +427,40 @@ class BasicPulseExtractor(PulseExtractorBase):
                        'laser_indices_falling': np.arange(len(count_data))}
 
         return return_dict
+
+    def gated_NI_contrast_extractor(self, count_data):
+        """
+        This method does not actually extract anything. It just passes through the data from the hardware.
+        This function is useful, if the extraction is performed in hardware.
+
+        @param 2D numpy.ndarray count_data: the raw timetrace data from a gated fast counter
+                                        dim 0: gate number; dim 1: time bin
+
+        @return dict: The extracted laser pulses of the timetrace as well as the indices for rising
+                  and falling flanks.
+        """
+        c_on = count_data[2::4]  # post dark time readout  #JSS: added
+        c_off = count_data[0::4]  # polarisation readout   #JSS: added
+
+        try:
+            count_data = (c_on - c_off) / (c_on + c_off) + 1  # count_data[1::2] - count_data[::2] #JSS: added for contrast based measurement
+        except:
+            count_data = np.zeros(len(c_on)) + 1  # JSS: added
+            # Create return dictionary
+        return_dict = {'laser_counts_arr': np.array(count_data),
+                       'laser_indices_rising': np.arange(len(count_data)),
+                       'laser_indices_falling': np.arange(len(count_data))}
+        print("analyzer is gated_pass_through")
+        return return_dict
+
+    def gated_NI_laser_extractor(self, count_data):
+        Laser = np.diff(count_data)  # JSS: added
+        #print("laser diff:", Laser)
+        Laser = Laser[0::2]
+        #print("NI_laser_extractor:", Laser)
+        # Create return dictionary
+        return_dict = {'laser_counts_arr': np.array(Laser),
+                       'laser_indices_rising': np.arange(len(Laser)),
+                       'laser_indices_falling': np.arange(len(Laser))}
+        print("NI_laser_extractor")
+        return return_dict

@@ -28,6 +28,8 @@ from interface.odmr_counter_interface import ODMRCounterInterface
 from interface.microwave_interface import MicrowaveInterface
 from interface.microwave_interface import TriggerEdge
 
+import time
+
 class ODMRCounterMicrowaveInterfuse(GenericLogic, ODMRCounterInterface,
                                     MicrowaveInterface):
     """
@@ -40,6 +42,8 @@ class ODMRCounterMicrowaveInterfuse(GenericLogic, ODMRCounterInterface,
 
     slowcounter = Connector(interface='SlowCounterInterface')
     microwave = Connector(interface='MicrowaveInterface')
+    pulsedmasterlogic = Connector(interface='PulsedMasterLogic')
+    poimanagerlogic = Connector(interface='PoiManagerLogic')
 
     def __init__(self, config, **kwargs):
         super().__init__(config=config, **kwargs)
@@ -53,6 +57,8 @@ class ODMRCounterMicrowaveInterfuse(GenericLogic, ODMRCounterInterface,
         """ Initialisation performed during activation of the module."""
         self._mw_device = self.microwave()
         self._sc_device = self.slowcounter()  # slow counter device
+        self._pulsedmasterlogic = self.pulsedmasterlogic() # if 'ConnectedInterfaceProxy' object is not callable, why does this not throw error??
+        self._poimanagerlogic = self.poimanagerlogic()
         pass
 
     def on_deactivate(self):
@@ -70,6 +76,7 @@ class ODMRCounterMicrowaveInterfuse(GenericLogic, ODMRCounterInterface,
 
         @return int: error code (0:OK, -1:error)
         """
+        print("clock freq", clock_frequency)  #JSS print
         return self._sc_device.set_up_clock(clock_frequency=clock_frequency,
                                                    clock_channel=clock_channel)
 
@@ -104,21 +111,146 @@ class ODMRCounterMicrowaveInterfuse(GenericLogic, ODMRCounterInterface,
         self._odmr_length = length
         return 0
 
-    def count_odmr(self, length = 100):
-        """ Sweeps the microwave and returns the counts on that sweep.
-
-        @param int length: length of microwave sweep in pixel
-
-        @return float[]: the photon counts per second
-        """
+    def count_odmr_1(self, length = 100): # software timed contrast measurement
 
         counts = np.zeros((len(self.get_odmr_channels()), length))
+        counts_off = np.zeros((len(self.get_odmr_channels()), length))
         # self.trigger()
         for i in range(length):
+
+            t1 = time.time()
             self.trigger()
-            counts[:, i] = self._sc_device.get_counter(samples=1)[0]
+            t2 = time.time()
+
+            for j in range(2000): #added for contrast type measurement
+
+                self._mw_device.set_power(0)  #added for contrast type measurement
+                time.sleep(0.1)
+                t3 = time.time()
+                self.set_up_odmr()  # added for contrast type measurement ##
+                data = self._sc_device.get_counter(samples=2)
+                counts[:, i] += np.mean(data, axis=1)  # or sum, depending on your need #JOHN:CAREFUL!
+                t4 = time.time()
+                self.close_odmr() #added for contrast type measurement ##
+
+
+                self._mw_device.set_power(-100)   #added for contrast type measurement
+                time.sleep(0.1)
+                self.set_up_odmr()  # added for contrast type measurement ##
+                data2 = self._sc_device.get_counter(samples=2)   #added for contrast type measurement
+                counts_off[:, i] += np.mean(data2, axis=1)   #added for contrast type measurement
+
+                self.close_odmr() #added for contrast type measurement ##
+
+            print(f"trigger: {(t2 - t1) * 1000:.1f} ms, read: {(t4 - t3) * 1000:.1f} ms, power switch: {(t3 - t2) * 1000:.1f} ms") #") #
+            print("counted", counts_off, counts)#)#    #modified for contrast type measurement
+
         self.trigger()
-        return False, counts
+        self.set_up_odmr()  # added for contrast type measurement ##
+        return False, (counts - counts_off)/(counts + counts_off) + 1 #counts #     #modified for contrast type measurement
+
+    def count_odmr_2(self, length=100): #pulsed cw-odmr, with nv optimization DURING THE SWEEP!
+
+        odmr = np.zeros((1, length))
+        odmr_err = np.zeros((1, length))
+        # self.trigger()
+        for i in range(length):
+
+            t1 = time.time()
+            self.trigger()
+            t2 = time.time()
+
+            ############################################################
+            # If everything is properly set, we can start a measurement simply by calling:
+            self._pulsedmasterlogic.toggle_pulsed_measurement(True)
+            print("initial state:", self._pulsedmasterlogic.module_state(), ", init sweep:",
+                  self._pulsedmasterlogic.elapsed_sweeps)
+
+            # time.sleep(5)
+            while self._pulsedmasterlogic.status_dict['measurement_running'] == 0: #module_state() == 'locked':#
+            # print(pulsedmeasurementlogic.module_state())
+                time.sleep(0.2)
+            self._poimanagerlogic.start_periodic_refocus()
+            while self._pulsedmasterlogic.elapsed_sweeps != 1:
+                time.sleep(0.2)
+
+            while self._pulsedmasterlogic.elapsed_sweeps < 1:
+                time.sleep(0.2)
+            print("2")
+
+            # we can stop measurement simply by calling:
+            self._pulsedmasterlogic.toggle_pulsed_measurement(False)
+            # Wait until the pulsedmeasurementlogic is actually idle and the measurement is stopped
+            while self._pulsedmasterlogic.status_dict['measurement_running'] == 1:  # module_state() == 'locked':#
+                # print(pulsedmeasurementlogic.module_state())
+                time.sleep(0.2)
+            print("Final state:", self._pulsedmasterlogic.module_state(), ", final sweep:",
+                  self._pulsedmasterlogic.elapsed_sweeps)
+            self._poimanagerlogic.stop_periodic_refocus()
+            ############################################################
+
+            contrast = self._pulsedmasterlogic.signal_data[1]
+            error = self._pulsedmasterlogic.measurement_error[1]
+            odmr[:, i] = contrast[0]
+            odmr_err[:, i] = error[0]
+
+            print("odmr:", odmr, odmr_err)
+
+        self.trigger()
+        return False, odmr
+
+    def count_odmr(self, length=100): # pulsed cw-odmr, with poi manager isolated
+
+        odmr = np.zeros((1, length))
+        odmr_err = np.zeros((1, length))
+        # self.trigger()
+        for i in range(length):
+
+            t1 = time.time()
+            self.trigger()
+            t2 = time.time()
+
+            self._pulsedmasterlogic.toggle_pulse_generator(True)
+            self._poimanagerlogic.start_periodic_refocus()
+            time.sleep(7.5)
+            self._poimanagerlogic.stop_periodic_refocus()
+            self._pulsedmasterlogic.toggle_pulse_generator(False)
+            ############################################################
+            # If everything is properly set, we can start a measurement simply by calling:
+            self._pulsedmasterlogic.toggle_pulsed_measurement(True)
+            print("initial state:", self._pulsedmasterlogic.module_state(), ", init sweep:", self._pulsedmasterlogic.elapsed_sweeps)
+
+            # time.sleep(5)
+            while self._pulsedmasterlogic.status_dict['measurement_running'] == 0: #module_state() == 'locked':#
+            # print(pulsedmeasurementlogic.module_state())
+                time.sleep(0.2)
+
+            while self._pulsedmasterlogic.elapsed_sweeps != 1:
+                time.sleep(0.2)
+
+            while self._pulsedmasterlogic.elapsed_sweeps < 2:
+                time.sleep(0.2)
+            print("2")
+
+            # we can stop measurement simply by calling:
+            self._pulsedmasterlogic.toggle_pulsed_measurement(False)
+            # Wait until the pulsedmeasurementlogic is actually idle and the measurement is stopped
+            while self._pulsedmasterlogic.status_dict['measurement_running'] == 1:  # module_state() == 'locked':#
+                # print(pulsedmeasurementlogic.module_state())
+                time.sleep(0.2)
+            print("Final state:", self._pulsedmasterlogic.module_state(), ", final sweep:", self._pulsedmasterlogic.elapsed_sweeps)
+
+            ############################################################
+
+            contrast = self._pulsedmasterlogic.signal_data[1]
+            error = self._pulsedmasterlogic.measurement_error[1]
+            odmr[:, i] = contrast[0]
+            odmr_err[:, i] = error[0]
+
+            print("odmr:", odmr, odmr_err)
+
+        self.trigger()
+        return False, odmr
 
     def close_odmr(self):
         """ Close the odmr and clean up afterwards.

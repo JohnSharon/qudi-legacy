@@ -50,7 +50,10 @@ class PulsedMeasurementLogic(GenericLogic):
     fastcounter = Connector(interface='FastCounterInterface')
     microwave = Connector(interface='MicrowaveInterface')
     pulsegenerator = Connector(interface='PulserInterface')
-    poimanagerlogic = Connector(interface='PoiManagerLogic') #JSS: poimanager
+    poimanagerlogic = Connector(interface='PoiManagerLogic') #JSS: poimanager #optimizerlogic = Connector(interface='OptimizerLogic') #
+
+    sigStartPeriodicRefocus = QtCore.Signal() #JSS: poimanager
+    sigStopPeriodicRefocus = QtCore.Signal() #JSS: poimanager
 
     # Config options
     # Optional additional paths to import from
@@ -162,7 +165,12 @@ class PulsedMeasurementLogic(GenericLogic):
         # Create an instance of PulseExtractor
         self._pulseextractor = PulseExtractor(pulsedmeasurementlogic=self)
         self._pulseanalyzer = PulseAnalyzer(pulsedmeasurementlogic=self)
-        self._poimanagerlogic = self.poimanagerlogic()  # JSS: poimanager
+        self._poimanagerlogic = self.poimanagerlogic()  # JSS: poimanager #self._optimizerlogic = self.optimizerlogic() #
+        # JSS: should I use the reference _poimanagerlogic or directly the connector access poimanagerlogic() like in other modules?? Check this!!
+        self.sigStartPeriodicRefocus.connect(self._poimanagerlogic.start_periodic_refocus, QtCore.Qt.QueuedConnection)
+
+        self.sigStopPeriodicRefocus.connect(self._poimanagerlogic.stop_periodic_refocus, QtCore.Qt.QueuedConnection)
+
 
         # QTimer must be created here instead of __init__ because otherwise the timer will not run
         # in this logic's thread but in the manager instead.
@@ -230,8 +238,8 @@ class PulsedMeasurementLogic(GenericLogic):
         self._recalled_raw_data_tag = None
 
         # Connect internal signals
-        self.sigStartTimer.connect(self.__analysis_timer.start, QtCore.Qt.QueuedConnection)
-        self.sigStopTimer.connect(self.__analysis_timer.stop, QtCore.Qt.QueuedConnection)
+        self.sigStartTimer.connect(self.__analysis_timer.start, QtCore.Qt.QueuedConnection) # JSS: poimanager
+        self.sigStopTimer.connect(self.__analysis_timer.stop, QtCore.Qt.QueuedConnection)# JSS: poimanager
         return
 
     def on_deactivate(self):
@@ -250,6 +258,9 @@ class PulsedMeasurementLogic(GenericLogic):
         self.__analysis_timer.timeout.disconnect()
         self.sigStartTimer.disconnect()
         self.sigStopTimer.disconnect()
+
+        self.sigStartPeriodicRefocus.disconnect(self._poimanagerlogic.start_periodic_refocus)
+        self.sigStopPeriodicRefocus.disconnect(self._poimanagerlogic.stop_periodic_refocus)
         return
 
     ############################################################################
@@ -822,12 +833,25 @@ class PulsedMeasurementLogic(GenericLogic):
                 if self.__use_ext_microwave:
                     self.microwave_on()
 
-                ##poi manager part########
+                # ##poi manager part########
+                # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
+                #     self.__loaded_waveform = self._pulsedmasterlogic.loaded_asset
+                #     self._pulsedmasterlogic.sample_ensemble('laser', with_load=True)
+                #     while self._pulsedmasterlogic.status_dict['sampload_busy']:
+                #         time.sleep(0.2)
+                # else:
+                #     self.log.warning("laser sequence not created, will optimize POI with the measurement sequence")
                 self.pulse_generator_on()
-                self._poimanagerlogic.start_periodic_refocus()
-                time.sleep(7.5)
-                self._poimanagerlogic.stop_periodic_refocus()
+                time.sleep(2)
+                self.sigStartPeriodicRefocus.emit() #self._poimanagerlogic.start_periodic_refocus() #._optimizerlogic.start_refocus()#
+                time.sleep(8.5)
+                self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
                 self.pulse_generator_off()
+                time.sleep(2)
+                # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
+                #     self._pulsedmasterlogic.sample_ensemble(self.__loaded_waveform, with_load=True)
+                #     while self._pulsedmasterlogic.status_dict['sampload_busy']:
+                #         time.sleep(0.2)
                 ##########################
 
                 # start fast counter
@@ -921,9 +945,21 @@ class PulsedMeasurementLogic(GenericLogic):
                 self.fast_counter_pause()
 
                 ##poi manager part########
-                self._poimanagerlogic.start_periodic_refocus()
-                time.sleep(7.5)
-                self._poimanagerlogic.stop_periodic_refocus()
+                try:
+                    self.pulse_generator_off()
+                except Exception as e:
+                    self.log.debug('pulse generator was already off before pause!', e)
+                # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
+                #     self._pulsedmasterlogic.sample_ensemble('laser', with_load=True)
+                #     while self._pulsedmasterlogic.status_dict['sampload_busy']:
+                #         time.sleep(0.2)
+                self.pulse_generator_on()
+                time.sleep(1)
+                self.sigStartPeriodicRefocus.emit()#self._poimanagerlogic.start_periodic_refocus() #_optimizerlogic.start_refocus()
+                time.sleep(8.5)
+                self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
+
+                #no need to load the measurement pulse sequence, as we'll optimize again on "continue"
                 ##########################
 
                 self.pulse_generator_off()
@@ -951,11 +987,18 @@ class PulsedMeasurementLogic(GenericLogic):
                     self.microwave_on()
 
                 ##poi manager part########
+                #NO need to load laser again, as it was already loaded on pausing
                 self.pulse_generator_on()
-                self._poimanagerlogic.start_periodic_refocus()
-                time.sleep(7.5)
-                self._poimanagerlogic.stop_periodic_refocus()
+                time.sleep(1)
+                self.sigStartPeriodicRefocus.emit()#self._poimanagerlogic.start_periodic_refocus()#_optimizerlogic.start_refocus()#
+                time.sleep(8.5)
+                self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
                 self.pulse_generator_off()
+                time.sleep(1)
+                # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
+                #     self._pulsedmasterlogic.sample_ensemble(self.__loaded_waveform, with_load=True)
+                #     while self._pulsedmasterlogic.status_dict['sampload_busy']:
+                #         time.sleep(0.2)
                 ##########################
 
                 self.fast_counter_continue()
@@ -1173,12 +1216,24 @@ class PulsedMeasurementLogic(GenericLogic):
 
 
                 ##poi manager part########
-                self._poimanagerlogic.start_periodic_refocus()
-                time.sleep(7.5)
-                self._poimanagerlogic.stop_periodic_refocus()
+                self.pulse_generator_off()
+                # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
+                #     self._pulsedmasterlogic.sample_ensemble('laser', with_load=True)
+                #     while self._pulsedmasterlogic.status_dict['sampload_busy']:
+                #         time.sleep(0.2)
+                self.pulse_generator_on()
+                time.sleep(1)
+                self.sigStartPeriodicRefocus.emit()#self._poimanagerlogic.start_periodic_refocus()#_optimizerlogic.start_refocus()#
+                time.sleep(8.5)
+                self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
+                self.pulse_generator_off()
+                # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
+                #     self._pulsedmasterlogic.sample_ensemble(self.__loaded_waveform, with_load=True)
+                #     while self._pulsedmasterlogic.status_dict['sampload_busy']:
+                #         time.sleep(0.2)
                 ##########################
 
-                self.pulse_generator_off() #JSS: added
+                #self.pulse_generator_off() #JSS: added #JSS: removed as already added above before loading waveform
                 #self.pause_pulsed_measurement()  #JSS: added
 
                 tmp_signal, tmp_error = self._analyze_laser_pulses()
@@ -1220,7 +1275,7 @@ class PulsedMeasurementLogic(GenericLogic):
             self.sigMeasurementDataUpdated.emit() #JSS: Should i indent?
             print("self.module_state() == locked in _pulsed_analysis_loop")
 
-            if self.stop_measurement == False: #JSS: ADDED $JSS: Removing this, dont think we need extra sweep
+            if self.stop_measurement == False: #JSS: ADDED $JSS: Pending: Remove all this, dont think we need extra sweep
                 self.fast_counter_continue() #JSS: added
                 self.pulse_generator_on() #JSS: added
                 #self.continue_pulsed_measurement()  #JSS: added
@@ -1357,8 +1412,8 @@ class PulsedMeasurementLogic(GenericLogic):
 
     ############################################################################
     @QtCore.Slot(str, bool)
-    def save_measurement_data(self, tag=None, with_error=True, save_laser_pulses=True, save_pulsed_measurement=True,
-                              save_figure=True):
+    def save_measurement_data(self, tag=None, with_error=True, save_laser_pulses=False, save_pulsed_measurement=True,
+                              save_figure=True, save_photon_rate=True, save_raw_timetrace=False):
         """
         Prepare data to be saved and create a proper plot of the data
 
@@ -1370,7 +1425,13 @@ class PulsedMeasurementLogic(GenericLogic):
 
         @return str: filepath where data were saved
         """
-        filepath = self.savelogic().get_path_for_module('PulsedMeasurement')
+        folder_name = 'PulsedMeasurement'
+        if "\\" in tag:
+            folder_name, tag = tag.split("\\", 1)
+        else:
+            folder_name = ""
+
+        filepath = self.savelogic().get_path_for_module(folder_name)
         timestamp = datetime.datetime.now()
 
         #####################################################################
@@ -1409,15 +1470,20 @@ class PulsedMeasurementLogic(GenericLogic):
         #####################################################################
         if save_pulsed_measurement:
             if tag:
-                filelabel = tag + '_pulsed_measurement'
+                filelabel = tag
             else:
-                filelabel = 'pulsed_measurement'
+                filelabel = ""
 
             # prepare the data in a dict or in an OrderedDict:
-            header_str = 'Controlled variable'
+            hdr_variable = 'Controlled variable'
+            if self._data_labels[0]: hdr_variable = self._data_labels[0]
+            hdr_data = '\tSignal'
+            if self._data_labels[1]: hdr_data = "\t" + self._data_labels[1]
+
+            header_str = hdr_variable
             if self._data_units[0]:
                 header_str += '({0})'.format(self._data_units[0])
-            header_str += '\tSignal'
+            header_str += hdr_data
             if self._data_units[1]:
                 header_str += '({0})'.format(self._data_units[1])
             if self._alternating:
@@ -1434,14 +1500,10 @@ class PulsedMeasurementLogic(GenericLogic):
                         header_str += '({0})'.format(self._data_units[1])
             data = OrderedDict()
 
-            # JSS created data attributes to use the same data to be saved with c_on/c_off (code added in P master)
-            self.header_str = header_str
             if with_error:
-                self.data_contrast = np.vstack((self.signal_data, self.measurement_error[1:])).transpose()
+                data[header_str] = np.vstack((self.signal_data, self.measurement_error[1:])).transpose()
             else:
-                self.data_contrast = self.signal_data.transpose()
-
-            data[header_str] = self.data_contrast
+                data[header_str] = self.signal_data.transpose()
 
             # write the parameters:
             parameters = OrderedDict()
@@ -1453,6 +1515,7 @@ class PulsedMeasurementLogic(GenericLogic):
             parameters['analysis parameters'] = self.analysis_settings
             parameters['extraction parameters'] = self.extraction_settings
             parameters['fast counter settings'] = self.fast_counter_settings
+
 
             if save_figure:
                 # Prepare the figure to save as a "data thumbnail"
@@ -1475,6 +1538,8 @@ class PulsedMeasurementLogic(GenericLogic):
                     fig, (ax1, ax2) = plt.subplots(2, 1)
                 else:
                     fig, ax1 = plt.subplots()
+
+                ax1.set_title(filepath+"\\"+tag)
 
                 if with_error:
                     ax1.errorbar(x=x_axis_scaled, y=self.signal_data[1],
@@ -1543,11 +1608,23 @@ class PulsedMeasurementLogic(GenericLogic):
 
                         column_text = heading + '\n' + column_text
 
+                        #Fit params outside the plot
+                        '''
                         ax1.text(1.00 + rel_offset, 0.99, column_text,
                                  verticalalignment='top',
                                  horizontalalignment='left',
                                  transform=ax1.transAxes,
                                  fontsize=12)
+                        '''
+                        # Fit params inside the plot
+                        ax1.text(
+                            1.00, 0.98,
+                            column_text,
+                            verticalalignment='top',
+                            horizontalalignment='right',
+                            transform=ax1.transAxes,
+                            fontsize=12
+                        )
 
                         # the rel_offset in position of the text is a linear function
                         # which depends on the longest entry in the column
@@ -1666,17 +1743,47 @@ class PulsedMeasurementLogic(GenericLogic):
                     ax1.set_ylabel('{0}'.format(self._data_labels[1]))
 
                 fig.tight_layout()
-                ax1.legend(bbox_to_anchor=(0., 1.02, 1., .102), loc=3, ncol=2,
-                           mode="expand", borderaxespad=0.)
+                #ax1.legend(bbox_to_anchor=(0., 1.02, 1., .102), loc=3, ncol=2, #JSS: pending: need to make legends optional
+                #           mode="expand", borderaxespad=0.)
                 # plt.legend(bbox_to_anchor=(0., 1.02, 1., .102), loc=3, ncol=2,
                 #            mode="expand", borderaxespad=0.)
+
+
             else:
                 fig = None
 
-            self.savelogic().save_data(data, timestamp=timestamp,
+
+            if not save_photon_rate:
+                self.savelogic().save_data(data, timestamp=timestamp,
                                        parameters=parameters, fmt='%.15e',
                                        filepath=filepath, filelabel=filelabel, filetype='text',
                                        delimiter='\t', plotfig=fig)
+            else:
+                # JSS: created data attributes to use the same data to be saved with c_on/c_off (code added in P master)
+                self.data_contrast = data[header_str]
+                self.header_str = header_str
+                self.parameters = parameters
+                self.savelogic().save_data(timestamp=timestamp,
+                                           filepath=filepath, filelabel=filelabel,
+                                           plotfig=fig)
+
+            if save_figure:
+                ########### Also save a simple figure with only fit+data #############
+                fig, ax1 = plt.subplots()
+                ax1.set_title(filepath + "\\" + tag + "_raw")
+                ax1.plot(x_axis_scaled, self.signal_data[1], '-o', color=colors[0],
+                             linestyle=':', linewidth=0.5)
+                ax1.set_xlabel('{0} ({1}{2})'.format(self._data_labels[0], counts_prefix, self._data_units[0]))
+                if self._data_units[1]:
+                    ax1.set_ylabel('{0} ({1})'.format(self._data_labels[1], self._data_units[1]))
+                else:
+                    ax1.set_ylabel('{0}'.format(self._data_labels[1]))
+                fig.tight_layout()
+
+                self.savelogic().save_data(timestamp=timestamp,
+                                           filepath=filepath, filelabel=filelabel+"_raw",
+                                           plotfig=fig)
+
 
         #####################################################################
         ####                Save raw data timetrace                      ####
@@ -1697,8 +1804,8 @@ class PulsedMeasurementLogic(GenericLogic):
         parameters['Controlled variable'] = list(self.signal_data[0])
         parameters['Approx. measurement time (s)'] = self.__elapsed_time
         parameters['Measurement sweeps'] = self.__elapsed_sweeps
-
-        self.savelogic().save_data(data, timestamp=timestamp,
+        if save_raw_timetrace:
+            self.savelogic().save_data(data, timestamp=timestamp,
                                    parameters=parameters, fmt='%d',
                                    filepath=filepath, filelabel=filelabel,
                                    filetype=self._raw_data_save_type,

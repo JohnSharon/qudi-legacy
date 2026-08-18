@@ -590,8 +590,8 @@ class PulsedMasterLogic(GenericLogic):
     def benchmark_completed(self):
         self.status_dict['benchmark_busy'] = False
 
-    def save_measurement_data(self, tag=None, with_error=True, save_laser_pulses=True, save_pulsed_measurement=True,
-                              save_figure=True):
+    def save_measurement_data(self, tag=None, with_error=True, save_laser_pulses=False, save_pulsed_measurement=True,
+                              save_figure=True, save_photon_rate=True, save_raw_timetrace=False):
         """
         Prepare data to be saved and create a proper plot of the data.
         This is just handed over to the measurement logic.
@@ -605,12 +605,17 @@ class PulsedMasterLogic(GenericLogic):
         @return str: filepath where data were saved
         """
         self.pulsedmeasurementlogic().save_measurement_data(tag, with_error, save_laser_pulses, save_pulsed_measurement,
-                                                            save_figure)
+                                                            save_figure, save_photon_rate, save_raw_timetrace)
 
-
-
-        #JSS: following added to save photon rate
-        filepath = self.pulsedmeasurementlogic().savelogic().get_path_for_module('PulsedMeasurement')
+        # JSS: following added to save photon rate
+        if not save_photon_rate:
+            return
+        folder_name = 'PulsedMeasurement'
+        if "\\" in tag:
+            folder_name, tag = tag.split("\\", 1)
+        else:
+            folder_name = ""
+        filepath = self.pulsedmeasurementlogic().savelogic().get_path_for_module(folder_name)
         timestamp = datetime.datetime.now()
 
         #######################################################################
@@ -622,11 +627,11 @@ class PulsedMasterLogic(GenericLogic):
         if self.pulsedmeasurementlogic().fastcounter()._contrast_based == False:
             return
 
-        if save_laser_pulses:
+        if save_photon_rate:
             if tag:
-                filelabel = tag + '_contrast_photon_rate'
+                filelabel = tag
             else:
-                filelabel = 'contrast_photon_rate'
+                filelabel = ''
 
             # use the data dict already created in above pulsedmeasurementlogic function:
             data_contrast = self.pulsedmeasurementlogic().data_contrast
@@ -648,16 +653,13 @@ class PulsedMasterLogic(GenericLogic):
 
             c_off = photon_rate[::2].reshape(-1, 1)
             c_on = photon_rate[1::2].reshape(-1, 1)
+            print("c_on:", c_on, "c_off:", c_off)
             header += '\tc_on(k/s)' + '\tc_off(k/s)'
             data_contrast = np.concatenate((data_contrast, c_on, c_off), axis=1)
             data[header] = data_contrast
 
             # write the parameters:
-            parameters = OrderedDict()
-            parameters['bin width (s)'] = self.fast_counter_settings['bin_width']
-            parameters['record length (s)'] = self.fast_counter_settings['record_length']
-            parameters['gated counting'] = self.fast_counter_settings['is_gated']
-            parameters['extraction parameters'] = self.pulsedmeasurementlogic().extraction_settings
+            parameters = self.pulsedmeasurementlogic().parameters
 
             self.pulsedmeasurementlogic().savelogic().save_data(data,
                                        timestamp=timestamp,
@@ -859,7 +861,7 @@ class PulsedMasterLogic(GenericLogic):
             object_instance = self.saved_pulse_sequences.get(asset_name)
         else:
             object_instance = None
-
+        self.log.debug('asset_type: '+str(asset_type)+', asset_name: '+str(asset_name)+', object_instance: '+str(object_instance))
         if object_instance is None:
             self.pulsedmeasurementlogic().sampling_information = dict()
             self.pulsedmeasurementlogic().measurement_information = dict()

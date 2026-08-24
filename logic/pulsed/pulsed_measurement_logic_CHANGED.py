@@ -131,7 +131,6 @@ class PulsedMeasurementLogic(GenericLogic):
         self.__start_time = 0
         self.__elapsed_time = 0
         self.__elapsed_sweeps = 0
-        self.__stop_requested = False #JSS: stop sweep
 
         # threading
         self._threadlock = Mutex()
@@ -151,6 +150,10 @@ class PulsedMeasurementLogic(GenericLogic):
         self._time_of_pause = None
         self._elapsed_pause = 0
 
+        # Stop measurement flag
+        self._stop_measurement = True  #JSS: added
+        self.__stop_requested = False #JSS: stop sweep
+
         # for fit:
         self.fc = None  # Fit container
         self.fit_result = None
@@ -166,11 +169,6 @@ class PulsedMeasurementLogic(GenericLogic):
         self._pulseextractor = PulseExtractor(pulsedmeasurementlogic=self)
         self._pulseanalyzer = PulseAnalyzer(pulsedmeasurementlogic=self)
         self._poimanagerlogic = self.poimanagerlogic()  # JSS: poimanager #self._optimizerlogic = self.optimizerlogic() #
-        # JSS: should I use the reference _poimanagerlogic or directly the connector access poimanagerlogic() like in other modules?? Check this!!
-        self.sigStartPeriodicRefocus.connect(self._poimanagerlogic.start_periodic_refocus, QtCore.Qt.QueuedConnection)
-
-        self.sigStopPeriodicRefocus.connect(self._poimanagerlogic.stop_periodic_refocus, QtCore.Qt.QueuedConnection)
-
 
         # QTimer must be created here instead of __init__ because otherwise the timer will not run
         # in this logic's thread but in the manager instead.
@@ -206,8 +204,6 @@ class PulsedMeasurementLogic(GenericLogic):
 
         # Turn off pulse generator
         self.pulse_generator_off()
-        self.stop_measurement = True  #JSS: added
-
 
         # Check and configure fast counter
         binning_constraints = self.fastcounter().get_constraints()['hardware_binwidth_list']
@@ -238,8 +234,13 @@ class PulsedMeasurementLogic(GenericLogic):
         self._recalled_raw_data_tag = None
 
         # Connect internal signals
-        self.sigStartTimer.connect(self.__analysis_timer.start, QtCore.Qt.QueuedConnection) # JSS: poimanager
-        self.sigStopTimer.connect(self.__analysis_timer.stop, QtCore.Qt.QueuedConnection)# JSS: poimanager
+        self.sigStartTimer.connect(self.__analysis_timer.start, QtCore.Qt.QueuedConnection)
+        self.sigStopTimer.connect(self.__analysis_timer.stop, QtCore.Qt.QueuedConnection)
+
+        # Connect signals to POI manager
+        # JSS: doubt: should I use the reference _poimanagerlogic or directly the connector access poimanagerlogic() like in other modules?
+        self.sigStartPeriodicRefocus.connect(self._poimanagerlogic.start_periodic_refocus, QtCore.Qt.QueuedConnection)  # JSS: poimanager
+        self.sigStopPeriodicRefocus.connect(self._poimanagerlogic.stop_periodic_refocus, QtCore.Qt.QueuedConnection) # JSS: poimanager
         return
 
     def on_deactivate(self):
@@ -794,7 +795,7 @@ class PulsedMeasurementLogic(GenericLogic):
         print("pm logic:start_pulsed_measurement")
         self.__stop_requested = False  # JSS: stop sweep
         self.sigMeasurementStatusUpdated.emit(True, False)
-        self.stop_measurement = False #JSS: added
+        self._stop_measurement = False #JSS: added
         # Check if measurement settings need to be invoked
         if self._invoke_settings_from_sequence:
             if self._measurement_information:
@@ -843,9 +844,10 @@ class PulsedMeasurementLogic(GenericLogic):
                 #     self.log.warning("laser sequence not created, will optimize POI with the measurement sequence")
                 self.pulse_generator_on()
                 time.sleep(2)
-                self.sigStartPeriodicRefocus.emit() #self._poimanagerlogic.start_periodic_refocus() #._optimizerlogic.start_refocus()#
+                #self.sigStartPeriodicRefocus.emit() #self._poimanagerlogic.start_periodic_refocus()
+                self._poimanagerlogic.optimise_poi_position(self._poimanagerlogic.active_poi)
                 time.sleep(8.5)
-                self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
+                #self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
                 self.pulse_generator_off()
                 time.sleep(2)
                 # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
@@ -884,7 +886,7 @@ class PulsedMeasurementLogic(GenericLogic):
 
         # Get raw data and analyze it a last time just before stopping the measurement.
 
-        self.stop_measurement = True  #JSS added now
+        self._stop_measurement = True  #JSS added now
         try:
             self._pulsed_analysis_loop()
         except:
@@ -955,9 +957,10 @@ class PulsedMeasurementLogic(GenericLogic):
                 #         time.sleep(0.2)
                 self.pulse_generator_on()
                 time.sleep(1)
-                self.sigStartPeriodicRefocus.emit()#self._poimanagerlogic.start_periodic_refocus() #_optimizerlogic.start_refocus()
+                #self.sigStartPeriodicRefocus.emit()#self._poimanagerlogic.start_periodic_refocus() #_optimizerlogic.start_refocus()
+                self._poimanagerlogic.optimise_poi_position(self._poimanagerlogic.active_poi)
                 time.sleep(8.5)
-                self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
+                #self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
 
                 #no need to load the measurement pulse sequence, as we'll optimize again on "continue"
                 ##########################
@@ -990,9 +993,10 @@ class PulsedMeasurementLogic(GenericLogic):
                 #NO need to load laser again, as it was already loaded on pausing
                 self.pulse_generator_on()
                 time.sleep(1)
-                self.sigStartPeriodicRefocus.emit()#self._poimanagerlogic.start_periodic_refocus()#_optimizerlogic.start_refocus()#
+                #self.sigStartPeriodicRefocus.emit()#self._poimanagerlogic.start_periodic_refocus()#_optimizerlogic.start_refocus()#
+                self._poimanagerlogic.optimise_poi_position(self._poimanagerlogic.active_poi)
                 time.sleep(8.5)
-                self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
+                #self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
                 self.pulse_generator_off()
                 time.sleep(1)
                 # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
@@ -1223,9 +1227,10 @@ class PulsedMeasurementLogic(GenericLogic):
                 #         time.sleep(0.2)
                 self.pulse_generator_on()
                 time.sleep(1)
-                self.sigStartPeriodicRefocus.emit()#self._poimanagerlogic.start_periodic_refocus()#_optimizerlogic.start_refocus()#
+                #self.sigStartPeriodicRefocus.emit()#self._poimanagerlogic.start_periodic_refocus()#_optimizerlogic.start_refocus()#
+                self._poimanagerlogic.optimise_poi_position(self._poimanagerlogic.active_poi)
                 time.sleep(8.5)
-                self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
+                #self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
                 self.pulse_generator_off()
                 # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
                 #     self._pulsedmasterlogic.sample_ensemble(self.__loaded_waveform, with_load=True)
@@ -1275,7 +1280,7 @@ class PulsedMeasurementLogic(GenericLogic):
             self.sigMeasurementDataUpdated.emit() #JSS: Should i indent?
             print("self.module_state() == locked in _pulsed_analysis_loop")
 
-            if self.stop_measurement == False: #JSS: ADDED $JSS: Pending: Remove all this, dont think we need extra sweep
+            if self._stop_measurement == False: #JSS: ADDED $JSS: Pending: Remove all this, dont think we need extra sweep
                 self.fast_counter_continue() #JSS: added
                 self.pulse_generator_on() #JSS: added
                 #self.continue_pulsed_measurement()  #JSS: added

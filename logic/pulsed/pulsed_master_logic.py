@@ -68,6 +68,7 @@ class PulsedMasterLogic(GenericLogic):
     sigTimerIntervalChanged = QtCore.Signal(float)
     sigAlternativeDataTypeChanged = QtCore.Signal(str)
     sigManuallyPullData = QtCore.Signal()
+    # sigLoadEnsembleComplete = QtCore.Signal(object) #JSS: for letting PMeasurement logic know
 
     # signals for master module (i.e. GUI) coming from PulsedMeasurementLogic
     sigMeasurementDataUpdated = QtCore.Signal()
@@ -165,6 +166,11 @@ class PulsedMasterLogic(GenericLogic):
             self.pulsedmeasurementlogic().set_alternative_data_type, QtCore.Qt.QueuedConnection)
         self.sigManuallyPullData.connect(
             self.pulsedmeasurementlogic().manually_pull_data, QtCore.Qt.QueuedConnection)
+        try:
+            self.sigLoadedAssetUpdated.connect( #JSS: letting pmlogic know about loading
+                 self.pulsedmeasurementlogic()._on_load_ensemble_complete, QtCore.Qt.QueuedConnection)
+        except:
+            self.log.debug("pulsedmeasurementlogic does not implement dynamic-ensemble-loading")
 
         # Connect signals coming from PulsedMeasurementLogic
         self.pulsedmeasurementlogic().sigMeasurementDataUpdated.connect(
@@ -189,6 +195,11 @@ class PulsedMasterLogic(GenericLogic):
             self.sigAnalysisSettingsUpdated, QtCore.Qt.QueuedConnection)
         self.pulsedmeasurementlogic().sigExtractionSettingsUpdated.connect(
             self.sigExtractionSettingsUpdated, QtCore.Qt.QueuedConnection)
+        try:
+            self.pulsedmeasurementlogic().sigSampleEnsembleRequest.connect(
+                self.sample_ensemble) #for dynamic pulse ensemble loading
+        except:
+            self.log.debug("pulsedmeasurementlogic does not implement dynamic-ensemble-loading")
 
         # Connect signals controlling SequenceGeneratorLogic
         self.sigSavePulseBlock.connect(
@@ -280,6 +291,10 @@ class PulsedMasterLogic(GenericLogic):
         self.pulsedmeasurementlogic().sigMeasurementSettingsUpdated.disconnect()
         self.pulsedmeasurementlogic().sigAnalysisSettingsUpdated.disconnect()
         self.pulsedmeasurementlogic().sigExtractionSettingsUpdated.disconnect()
+        try:
+            self.pulsedmeasurementlogic().sigSampleEnsembleRequest.disconnect()
+        except:
+            pass
 
         # Disconnect signals controlling SequenceGeneratorLogic
         self.sigSavePulseBlock.disconnect()
@@ -806,10 +821,10 @@ class PulsedMasterLogic(GenericLogic):
             self.log.error('Loading of a different asset already in progress.\n'
                            'PulseBlockEnsemble "{0}" not loaded!'.format(ensemble_name))
             self.loaded_asset_updated(*self.loaded_asset)
-        elif self.status_dict['measurement_running']:
-            self.log.error('Loading of ensemble not possible while measurement is running.\n'
-                           'PulseBlockEnsemble "{0}" not loaded!'.format(ensemble_name))
-            self.loaded_asset_updated(*self.loaded_asset)
+        # elif self.status_dict['measurement_running']: #  JSS: imp! Check this!! pending:
+        #     self.log.error('Loading of ensemble not possible while measurement is running.\n'
+        #                    'PulseBlockEnsemble "{0}" not loaded!'.format(ensemble_name))
+        #     self.loaded_asset_updated(*self.loaded_asset)
         else:
             self.status_dict['loading_busy'] = True
             if self.status_dict['pulser_running']:
@@ -849,6 +864,7 @@ class PulsedMasterLogic(GenericLogic):
         self.status_dict['sampload_busy'] = False
         self.status_dict['loading_busy'] = False
         self.sigLoadedAssetUpdated.emit(asset_name, asset_type)
+        #self.sigLoadEnsembleComplete.emit(self.loaded_asset[0]) #JSS: alert pmlogic about loading
         # Transfer sequence information from PulseBlockEnsemble or PulseSequence to
         # PulsedMeasurementLogic to be able to invoke measurement settings from them
         if not asset_type:

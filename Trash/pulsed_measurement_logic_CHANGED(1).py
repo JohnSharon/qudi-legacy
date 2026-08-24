@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-This file contains the Qudi logic which controls all pulsed measurements.
+This file contains the Qudi logic which controls all pulsed measurements with NI DAQ.
+JSS: a trash version that doesn't have:
+ stop sweep, auto POI optimization, and option to save photon rate
 
 Qudi is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by

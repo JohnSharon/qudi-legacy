@@ -87,9 +87,9 @@ class SequenceGeneratorLogic(GenericLogic):
                                                             ('microwave_frequency', 2.87e9),
                                                             ('microwave_amplitude', 0.0),
                                                             ('rabi_period', 100e-9),
-                                                            ('laser_length', 3e-6),
-                                                            ('laser_delay', 500e-9),
-                                                            ('wait_time', 1e-6),
+                                                            ('laser_length', 150e-9),
+                                                            ('laser_delay', 850e-9),
+                                                            ('wait_time', 300e-9),                                                        ('polarization_time', 100e-6),
                                                             ('analog_trigger_voltage', 0.0)]))
 
     # The created pulse objects (PulseBlock, PulseBlockEnsemble, PulseSequence) are saved in

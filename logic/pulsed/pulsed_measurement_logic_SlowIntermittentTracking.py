@@ -117,6 +117,8 @@ class PulsedMeasurementLogic(GenericLogic):
     # Internal signals
     sigStartTimer = QtCore.Signal()
     sigStopTimer = QtCore.Signal()
+    # request master for loading pulse ensemble
+    sigSampleEnsembleRequest = QtCore.Signal(str, bool)
 
     def __init__(self, config, **kwargs):
         super().__init__(config=config, **kwargs)
@@ -160,6 +162,13 @@ class PulsedMeasurementLogic(GenericLogic):
         self.alt_fit_result = None
         self.signal_fit_data = np.empty((2, 0), dtype=float)  # The x,y data of the fit result
         self.signal_fit_alt_data = np.empty((2, 0), dtype=float)
+
+        #for dynamic pulse ensemble loading
+        self.__loaded_ensemble = None
+        self._main_ensemble = None
+        self.__sampload_busy = False
+        self.__devices_on = False
+        self._pa_loop_ended = True
         return
 
     def on_activate(self):
@@ -236,11 +245,6 @@ class PulsedMeasurementLogic(GenericLogic):
         # Connect internal signals
         self.sigStartTimer.connect(self.__analysis_timer.start, QtCore.Qt.QueuedConnection)
         self.sigStopTimer.connect(self.__analysis_timer.stop, QtCore.Qt.QueuedConnection)
-
-        # Connect signals to POI manager
-        # JSS: doubt: should I use the reference _poimanagerlogic or directly the connector access poimanagerlogic() like in other modules?
-        self.sigStartPeriodicRefocus.connect(self._poimanagerlogic.start_periodic_refocus, QtCore.Qt.QueuedConnection)  # JSS: poimanager
-        self.sigStopPeriodicRefocus.connect(self._poimanagerlogic.stop_periodic_refocus, QtCore.Qt.QueuedConnection) # JSS: poimanager
         return
 
     def on_deactivate(self):
@@ -260,9 +264,20 @@ class PulsedMeasurementLogic(GenericLogic):
         self.sigStartTimer.disconnect()
         self.sigStopTimer.disconnect()
 
-        self.sigStartPeriodicRefocus.disconnect(self._poimanagerlogic.start_periodic_refocus)
-        self.sigStopPeriodicRefocus.disconnect(self._poimanagerlogic.stop_periodic_refocus)
         return
+
+    ############################################################################
+    # Sequence Generator stuff (for dynamic Pulser Programming)
+    ############################################################################
+
+    @QtCore.Slot(str, str)
+    def _on_load_ensemble_complete(self, asset_name, asset_type):
+        print(asset_type, asset_name)
+        if asset_type == 'PulseBlockEnsemble' and asset_name != None and asset_name != "laser":
+
+            self.__loaded_ensemble = asset_name
+            self.__sampload_busy = False
+            print("self.__sampload_busy", self.__sampload_busy)
 
     ############################################################################
     # Fast counter control methods and properties
@@ -793,9 +808,7 @@ class PulsedMeasurementLogic(GenericLogic):
     def start_pulsed_measurement(self, stashed_raw_data_tag=''):
         """Start the analysis loop."""
         print("pm logic:start_pulsed_measurement")
-        self.__stop_requested = False  # JSS: stop sweep
         self.sigMeasurementStatusUpdated.emit(True, False)
-        self._stop_measurement = False #JSS: added
         # Check if measurement settings need to be invoked
         if self._invoke_settings_from_sequence:
             if self._measurement_information:
@@ -834,28 +847,6 @@ class PulsedMeasurementLogic(GenericLogic):
                 if self.__use_ext_microwave:
                     self.microwave_on()
 
-                # ##poi manager part########
-                # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
-                #     self.__loaded_waveform = self._pulsedmasterlogic.loaded_asset
-                #     self._pulsedmasterlogic.sample_ensemble('laser', with_load=True)
-                #     while self._pulsedmasterlogic.status_dict['sampload_busy']:
-                #         time.sleep(0.2)
-                # else:
-                #     self.log.warning("laser sequence not created, will optimize POI with the measurement sequence")
-                self.pulse_generator_on()
-                time.sleep(2)
-                #self.sigStartPeriodicRefocus.emit() #self._poimanagerlogic.start_periodic_refocus()
-                self._poimanagerlogic.optimise_poi_position(self._poimanagerlogic.active_poi)
-                time.sleep(8.5)
-                #self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
-                self.pulse_generator_off()
-                time.sleep(2)
-                # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
-                #     self._pulsedmasterlogic.sample_ensemble(self.__loaded_waveform, with_load=True)
-                #     while self._pulsedmasterlogic.status_dict['sampload_busy']:
-                #         time.sleep(0.2)
-                ##########################
-
                 # start fast counter
                 self.fast_counter_on()
                 # start pulse generator
@@ -864,6 +855,15 @@ class PulsedMeasurementLogic(GenericLogic):
                 # initialize analysis_timer
                 self.__elapsed_time = 0.0
                 self._elapsed_pause = 0
+
+                # initialize helpers for the SM in pulsed_analysis_loop
+                self.__stop_requested = False  # JSS: stop sweep
+                self._stop_measurement = False  # JSS: added
+                self.__sampload_busy = False
+                self.__devices_on = True
+                self._main_ensemble = self.__loaded_ensemble
+                self.log.debug("loaded ensemble acc to P.Measure.Logic:"+self._main_ensemble)
+
                 self.sigTimerUpdated.emit(self.__elapsed_time,
                                           self.__elapsed_sweeps,
                                           self.__timer_interval)
@@ -886,11 +886,7 @@ class PulsedMeasurementLogic(GenericLogic):
 
         # Get raw data and analyze it a last time just before stopping the measurement.
 
-        self._stop_measurement = True  #JSS added now
-        try:
-            self._pulsed_analysis_loop()
-        except:
-            pass
+        self._stop_measurement = True
 
         with self._threadlock:
             if self.module_state() == 'locked':
@@ -937,6 +933,7 @@ class PulsedMeasurementLogic(GenericLogic):
         """
         Pauses the measurement
         """
+        self._stop_measurement = True
         with self._threadlock:
             if self.module_state() == 'locked':
                 # pausing the timer
@@ -944,28 +941,6 @@ class PulsedMeasurementLogic(GenericLogic):
                     # stopping the timer
                     self.sigStopTimer.emit()
 
-                self.fast_counter_pause()
-
-                ##poi manager part########
-                try:
-                    self.pulse_generator_off()
-                except Exception as e:
-                    self.log.debug('pulse generator was already off before pause!', e)
-                # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
-                #     self._pulsedmasterlogic.sample_ensemble('laser', with_load=True)
-                #     while self._pulsedmasterlogic.status_dict['sampload_busy']:
-                #         time.sleep(0.2)
-                self.pulse_generator_on()
-                time.sleep(1)
-                #self.sigStartPeriodicRefocus.emit()#self._poimanagerlogic.start_periodic_refocus() #_optimizerlogic.start_refocus()
-                self._poimanagerlogic.optimise_poi_position(self._poimanagerlogic.active_poi)
-                time.sleep(8.5)
-                #self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
-
-                #no need to load the measurement pulse sequence, as we'll optimize again on "continue"
-                ##########################
-
-                self.pulse_generator_off()
                 if self.__use_ext_microwave:
                     self.microwave_off()
 
@@ -989,25 +964,24 @@ class PulsedMeasurementLogic(GenericLogic):
                 if self.__use_ext_microwave:
                     self.microwave_on()
 
-                ##poi manager part########
-                #NO need to load laser again, as it was already loaded on pausing
-                self.pulse_generator_on()
-                time.sleep(1)
-                #self.sigStartPeriodicRefocus.emit()#self._poimanagerlogic.start_periodic_refocus()#_optimizerlogic.start_refocus()#
-                self._poimanagerlogic.optimise_poi_position(self._poimanagerlogic.active_poi)
-                time.sleep(8.5)
-                #self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
-                self.pulse_generator_off()
-                time.sleep(1)
-                # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
-                #     self._pulsedmasterlogic.sample_ensemble(self.__loaded_waveform, with_load=True)
-                #     while self._pulsedmasterlogic.status_dict['sampload_busy']:
-                #         time.sleep(0.2)
-                ##########################
+                if self._pa_loop_ended == True: # "if" Condition will skip this section, if the previous pulsed_analysis_loop is still running
+                    self.sigSampleEnsembleRequest.emit("laser", True)
+                    time.sleep(0.5)  # laser loading is pretty fast
+                    ##poi manager part#######
+                    self.pulse_generator_on()
+                    time.sleep(1)
+                    print("Click optimize")
+                    self._poimanagerlogic.optimise_poi_position(self._poimanagerlogic.active_poi)
 
-                self.fast_counter_continue()
-                self.pulse_generator_on()
+                    time.sleep(8.5)
+                    self.pulse_generator_off()
+                    time.sleep(1)
+                    ##########################
+                    self.__sampload_busy = True
+                    self.sigSampleEnsembleRequest.emit(self._main_ensemble, True)
 
+                self._stop_measurement = False
+                self.__devices_on = False #redudant
                 # un-pausing the timer
                 if not self.__analysis_timer.isActive():
                     self.sigStartTimer.emit()
@@ -1210,36 +1184,37 @@ class PulsedMeasurementLogic(GenericLogic):
             calculates fluorescence signal and creates plots.
         """
         print("pm_logic: p analysis loop")
+        self._pa_loop_ended = False
+
+        if self.__sampload_busy or self._stop_measurement:
+            self._pa_loop_ended = True
+            print("pa_loop ended early")
+            return
+
+        if not self.__devices_on:
+            self.fast_counter_continue()
+            self.pulse_generator_on()
 
         with self._threadlock:
             if self.module_state() == 'locked':
                 # Update elapsed time
 
                 self._extract_laser_pulses()
-                self.fast_counter_pause() #JSS: added
-
-
-                ##poi manager part########
+                #time.sleep(7) #artifical measurement time #JSS: pending: remove this fr
+                self.fast_counter_pause()
                 self.pulse_generator_off()
-                # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
-                #     self._pulsedmasterlogic.sample_ensemble('laser', with_load=True)
-                #     while self._pulsedmasterlogic.status_dict['sampload_busy']:
-                #         time.sleep(0.2)
-                self.pulse_generator_on()
                 time.sleep(1)
-                #self.sigStartPeriodicRefocus.emit()#self._poimanagerlogic.start_periodic_refocus()#_optimizerlogic.start_refocus()#
-                self._poimanagerlogic.optimise_poi_position(self._poimanagerlogic.active_poi)
-                time.sleep(8.5)
-                #self.sigStopPeriodicRefocus.emit()#self._poimanagerlogic.stop_periodic_refocus()
-                self.pulse_generator_off()
-                # if "laser" in self._pulsedmasterlogic.saved_pulse_block_ensembles.keys():
-                #     self._pulsedmasterlogic.sample_ensemble(self.__loaded_waveform, with_load=True)
-                #     while self._pulsedmasterlogic.status_dict['sampload_busy']:
-                #         time.sleep(0.2)
-                ##########################
+                ## POI Refinding part ########
+                self.sigSampleEnsembleRequest.emit("laser", True)
+                time.sleep(1)
+                self.pulse_generator_on()
 
-                #self.pulse_generator_off() #JSS: added #JSS: removed as already added above before loading waveform
-                #self.pause_pulsed_measurement()  #JSS: added
+                time.sleep(1)
+                self._poimanagerlogic.optimise_poi_position(self._poimanagerlogic.active_poi)
+                t_opt = time.time()
+                ##########################
+                #Data analysis is done while the optimization takes place
+                ##########################
 
                 tmp_signal, tmp_error = self._analyze_laser_pulses()
                 # exclude laser pulses to ignore
@@ -1274,34 +1249,38 @@ class PulsedMeasurementLogic(GenericLogic):
                 # Compute alternative data array from signal
                 self._compute_alt_data()
 
-            # emit signals
-            self.sigTimerUpdated.emit(self.__elapsed_time, self.__elapsed_sweeps,  #JSS: Check this!! Should i indented (push into if statement) these two,
+                # emit signals
+                self.sigTimerUpdated.emit(self.__elapsed_time, self.__elapsed_sweeps,  #JSS: Check this!! Should i indented (push into if statement) these two,
                                       self.__timer_interval)                       #coz this method runs once even after "stop", while the above "if" statement alone luckily doesnt execute...
-            self.sigMeasurementDataUpdated.emit() #JSS: Should i indent?
-            print("self.module_state() == locked in _pulsed_analysis_loop")
+                self.sigMeasurementDataUpdated.emit() #JSS: Should i indent?
+                print("self.module_state() == locked in _pulsed_analysis_loop")
 
-            if self._stop_measurement == False: #JSS: ADDED $JSS: Pending: Remove all this, dont think we need extra sweep
-                self.fast_counter_continue() #JSS: added
-                self.pulse_generator_on() #JSS: added
-                #self.continue_pulsed_measurement()  #JSS: added
-            else:
-                print("_pulsed_analysis_loop: measurement stopped before this")
-                #return
+
+                ### Switch off pulser, once the POI optimization is done (takes about 8.5s each)
+                t_opt = 8 - time.time() + t_opt
+                if t_opt > 0:
+                    time.sleep(t_opt)
+
+                self.pulse_generator_off()
+                time.sleep(1)
+            self.__sampload_busy = True
+            self.sigSampleEnsembleRequest.emit(self._main_ensemble, True)
 
             #JSS: stop sweep
             print("stop_sweep", self.__fast_counter_stop_sweep,
                   "elapsed_sweeps", self.elapsed_sweeps)
 
             if (self.__fast_counter_stop_sweep > 0
-                    and self.elapsed_sweeps >= self.__fast_counter_stop_sweep-1
-                    and not self.__stop_requested):
-                self.__stop_requested = True
+                    and self.elapsed_sweeps >= self.__fast_counter_stop_sweep):
+                self._stop_measurement = True
 
                 print("Automatic stop requested")
                 def delayed_stop():
                     self.stop_pulsed_measurement()
                 QtCore.QTimer.singleShot(0, delayed_stop)
 
+            self.__devices_on = False
+            self._pa_loop_ended = True
             return
 
     def _extract_laser_pulses(self):

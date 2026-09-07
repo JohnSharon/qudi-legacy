@@ -1426,7 +1426,7 @@ class BasicPredefinedGenerator(PredefinedGeneratorBase):
             tau_array = np.logspace(log_min, log_max, num=num_of_points, base=10.0, dtype=float) #tau_array = np.geomspace(tau_start, tau_end, num_of_points)
 
         # create the elements
-        waiting_element = self._get_laser_element(length=self.wait_time,
+        polarization_element = self._get_laser_element(length=self.polarization_time,
                                                       increment=0)
         laser_element = self._get_laser_gate_element(length=self.laser_length / 2,
                                                          increment=0)
@@ -1435,7 +1435,7 @@ class BasicPredefinedGenerator(PredefinedGeneratorBase):
         delay_element = self._get_laser_element(length=self.laser_delay,
                                                     increment=0)
 
-        start_element = self._get_idle_element(length=300e-9, increment=0.0)
+        start_element = self._get_idle_element(length=self.wait_time, increment=0.0)
         if alternating:  # get pi element
                 pi_element = self._get_mw_element(length=self.rabi_period / 2,
                                                   increment=0,
@@ -1449,7 +1449,7 @@ class BasicPredefinedGenerator(PredefinedGeneratorBase):
             tau_element = self._get_idle_element(length=tau, increment=0.0)
 
             t1_block.append(start_element) #JSS: forgot this one, but why would it make any difference
-            t1_block.append(waiting_element)
+            t1_block.append(polarization_element)
             t1_block.append(laser_element)
             t1_block.append(laser_only_element)
             t1_block.append(laser_element)

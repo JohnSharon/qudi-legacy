@@ -203,18 +203,18 @@ class ODMRCounterMicrowaveInterfuse(GenericLogic, ODMRCounterInterface,
 
         odmr = np.zeros((1, length))
         odmr_err = np.zeros((1, length))
-        # self.trigger()
+
         for i in range(length):
 
             t1 = time.time()
             self.trigger()
             t2 = time.time()
 
-            self._pulsedmasterlogic.toggle_pulse_generator(True)
-            self._poimanagerlogic.start_periodic_refocus()
-            time.sleep(7.5)
-            self._poimanagerlogic.stop_periodic_refocus()
-            self._pulsedmasterlogic.toggle_pulse_generator(False)
+            #self._pulsedmasterlogic.toggle_pulse_generator(True)
+            #self._poimanagerlogic.optimise_poi_position(self._poimanagerlogic.active_poi)
+            #time.sleep(8.5)
+            #self._pulsedmasterlogic.toggle_pulse_generator(False)
+            #time.sleep(1)
             ############################################################
             # If everything is properly set, we can start a measurement simply by calling:
             self._pulsedmasterlogic.toggle_pulsed_measurement(True)
@@ -225,15 +225,8 @@ class ODMRCounterMicrowaveInterfuse(GenericLogic, ODMRCounterInterface,
             # print(pulsedmeasurementlogic.module_state())
                 time.sleep(0.2)
 
-            while self._pulsedmasterlogic.elapsed_sweeps != 1:
-                time.sleep(0.2)
-
-            while self._pulsedmasterlogic.elapsed_sweeps < 2:
-                time.sleep(0.2)
             print("2")
 
-            # we can stop measurement simply by calling:
-            self._pulsedmasterlogic.toggle_pulsed_measurement(False)
             # Wait until the pulsedmeasurementlogic is actually idle and the measurement is stopped
             while self._pulsedmasterlogic.status_dict['measurement_running'] == 1:  # module_state() == 'locked':#
                 # print(pulsedmeasurementlogic.module_state())
@@ -247,10 +240,25 @@ class ODMRCounterMicrowaveInterfuse(GenericLogic, ODMRCounterInterface,
             odmr[:, i] = contrast[0]
             odmr_err[:, i] = error[0]
 
+            # Also return the photon rates (without and with MW, called c_off and c_on resp.)
+            laser_trace = self._pulsedmasterlogic.laser_data
+            number_of_gates = 2
+            ACQtime = int(len(laser_trace) / number_of_gates)
+            laser_trace = laser_trace.reshape(ACQtime, number_of_gates)
+            laser_trace = np.sum(laser_trace, axis=0)
+
+            readout_time = self._pulsedmasterlogic.generation_parameters['laser_length']
+            readout_time *= self._pulsedmasterlogic.fast_counter_settings['record_length']
+
+            photon_rate = laser_trace / readout_time / 1000  # photon rate (k/s)
+
+            c_off = photon_rate[0]
+            c_on = photon_rate[1]
+            print("c_on:", c_on, "c_off:", c_off)
             print("odmr:", odmr, odmr_err)
 
         self.trigger()
-        return False, odmr
+        return False, odmr, odmr_err, c_on, c_off
 
     def close_odmr(self):
         """ Close the odmr and clean up afterwards.

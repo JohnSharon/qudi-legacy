@@ -134,6 +134,10 @@ class ODMRLogic(GenericLogic):
              len(self._odmr_counter.get_odmr_channels()),
              self.odmr_plot_x.size]
         )
+        # other useful data like...
+        self.odmr_error = np.zeros(len(self.odmr_plot_x))
+        self.photon_rate_on = np.zeros(len(self.odmr_plot_x))
+        self.photon_rate_off = np.zeros(len(self.odmr_plot_x))
 
         # Switch off microwave and set CW frequency and power
         self.mw_off()
@@ -675,6 +679,11 @@ class ODMRLogic(GenericLogic):
                  len(self._odmr_counter.get_odmr_channels()),
                  self.odmr_plot_x.size]
             )
+            # Also initialize the odmr error and photon rates
+            self.odmr_error = np.zeros(len(self.odmr_plot_x))
+            self.photon_rate_on = np.zeros(len(self.odmr_plot_x))
+            self.photon_rate_off = np.zeros(len(self.odmr_plot_x))
+
             self.sigNextLine.emit()
             return 0
 
@@ -760,7 +769,7 @@ class ODMRLogic(GenericLogic):
             self.reset_sweep()
 
             # Acquire count data
-            error, new_counts = self._odmr_counter.count_odmr(length=self.odmr_plot_x.size)
+            error, new_counts, odmr_err, c_on, c_off = self._odmr_counter.count_odmr(length=self.odmr_plot_x.size)
 
             if error:
                 self.stopRequested = True
@@ -770,6 +779,9 @@ class ODMRLogic(GenericLogic):
             # Add new count data to raw_data array and append if array is too small
             if self._clearOdmrData:
                 self.odmr_raw_data[:, :, :] = 0
+                self.odmr_error[:] = 0
+                self.photon_rate_on[:] = 0
+                self.photon_rate_off[:] = 0
                 self._clearOdmrData = False
             if self.elapsed_sweeps == (self.odmr_raw_data.shape[0] - 1):
                 expanded_array = np.zeros(self.odmr_raw_data.shape)
@@ -786,6 +798,11 @@ class ODMRLogic(GenericLogic):
             self.odmr_raw_data = np.roll(self.odmr_raw_data, 1, axis=0)
 
             self.odmr_raw_data[0] = new_counts
+
+            # Add the photon rates and error in odmr
+            self.photon_rate_on += c_on
+            self.photon_rate_off += c_off
+            self.odmr_error += odmr_err
 
             # Add new count data to mean signal
             if self._clearOdmrData:
@@ -924,7 +941,10 @@ class ODMRLogic(GenericLogic):
 
                 num_points = len(frequency_arr)
                 data_end_ind = data_start_ind + num_points
-                data['count data (counts/s)'] = self.odmr_plot_y[nch][data_start_ind:data_end_ind]
+                data['ODMR_contrast'] = self.odmr_plot_y[nch][data_start_ind:data_end_ind]
+                data['ODMR_contrast_err'] = self.odmr_error[data_start_ind:data_end_ind]/max(1,self.elapsed_sweeps)
+                data['photon_rate_on'] = self.photon_rate_on[data_start_ind:data_end_ind]/max(1,self.elapsed_sweeps)
+                data['photon_rate_off'] = self.photon_rate_off[data_start_ind:data_end_ind]/max(1,self.elapsed_sweeps)
                 data_start_ind += num_points
 
                 parameters = OrderedDict()

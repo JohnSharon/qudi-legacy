@@ -52,8 +52,8 @@ class PulsedMeasurementLogic(GenericLogic):
     pulsegenerator = Connector(interface='PulserInterface')
     poimanagerlogic = Connector(interface='PoiManagerLogic') #JSS: poimanager #optimizerlogic = Connector(interface='OptimizerLogic') #
 
-    sigStartPeriodicRefocus = QtCore.Signal() #JSS: poimanager
-    sigStopPeriodicRefocus = QtCore.Signal() #JSS: poimanager
+    #sigStartPeriodicRefocus = QtCore.Signal() #JSS: poimanager
+    #sigStopPeriodicRefocus = QtCore.Signal() #JSS: poimanager
 
     # Config options
     # Optional additional paths to import from
@@ -168,7 +168,7 @@ class PulsedMeasurementLogic(GenericLogic):
         # Create an instance of PulseExtractor
         self._pulseextractor = PulseExtractor(pulsedmeasurementlogic=self)
         self._pulseanalyzer = PulseAnalyzer(pulsedmeasurementlogic=self)
-        self._poimanagerlogic = self.poimanagerlogic()  # JSS: poimanager #self._optimizerlogic = self.optimizerlogic() #
+        self._poimanagerlogic = self.poimanagerlogic()  # JSS: poimanager
 
         # QTimer must be created here instead of __init__ because otherwise the timer will not run
         # in this logic's thread but in the manager instead.
@@ -239,8 +239,8 @@ class PulsedMeasurementLogic(GenericLogic):
 
         # Connect signals to POI manager
         # JSS: doubt: should I use the reference _poimanagerlogic or directly the connector access poimanagerlogic() like in other modules?
-        self.sigStartPeriodicRefocus.connect(self._poimanagerlogic.start_periodic_refocus, QtCore.Qt.QueuedConnection)  # JSS: poimanager
-        self.sigStopPeriodicRefocus.connect(self._poimanagerlogic.stop_periodic_refocus, QtCore.Qt.QueuedConnection) # JSS: poimanager
+        #self.sigStartPeriodicRefocus.connect(self._poimanagerlogic.start_periodic_refocus, QtCore.Qt.QueuedConnection)  # JSS: poimanager
+        #self.sigStopPeriodicRefocus.connect(self._poimanagerlogic.stop_periodic_refocus, QtCore.Qt.QueuedConnection) # JSS: poimanager
         return
 
     def on_deactivate(self):
@@ -260,8 +260,8 @@ class PulsedMeasurementLogic(GenericLogic):
         self.sigStartTimer.disconnect()
         self.sigStopTimer.disconnect()
 
-        self.sigStartPeriodicRefocus.disconnect(self._poimanagerlogic.start_periodic_refocus)
-        self.sigStopPeriodicRefocus.disconnect(self._poimanagerlogic.stop_periodic_refocus)
+        #self.sigStartPeriodicRefocus.disconnect(self._poimanagerlogic.start_periodic_refocus)
+        #self.sigStopPeriodicRefocus.disconnect(self._poimanagerlogic.stop_periodic_refocus)
         return
 
     ############################################################################

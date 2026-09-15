@@ -1,6 +1,9 @@
 # -*- coding: utf-8 -*-
 """
 This file contains the Qudi logic which controls all pulsed measurements.
+Intermittent Tracking of POI happens in between each sweep.
+"Slow" means the tracking itself is timestaking as "laser" pulse and
+"measurement sequence" have to be alternatingly loaded after every sweep
 
 Qudi is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -1210,6 +1213,7 @@ class PulsedMeasurementLogic(GenericLogic):
                 self.pulse_generator_on()
 
                 time.sleep(1)
+                print("laser must be on now for optimization")
                 self._poimanagerlogic.optimise_poi_position(self._poimanagerlogic.active_poi)
                 t_opt = time.time()
                 ##########################

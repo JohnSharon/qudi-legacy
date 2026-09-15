@@ -1061,6 +1061,16 @@ class PredefinedGeneratorBase:
         return None if channel == '' else channel
 
     @property
+    def I_channel(self):
+        channel = self.generation_parameters.get('I_channel')
+        return None if channel == '' else channel
+
+    @property
+    def Q_channel(self):
+        channel = self.generation_parameters.get('Q_channel')
+        return None if channel == '' else channel
+
+    @property
     def analog_trigger_voltage(self):
         return self.generation_parameters.get('analog_trigger_voltage')
 
@@ -1090,8 +1100,18 @@ class PredefinedGeneratorBase:
         return self.generation_parameters.get('wait_time')
 
     @property
+    def idle_time(self):
+        return self.generation_parameters.get('idle_time')
+
+    @property
     def rabi_period(self):
         return self.generation_parameters.get('rabi_period')
+    @property
+    def mw_wait_time(self):
+        return self.generation_parameters.get('mw_wait_time')
+    @property
+    def polarization_time(self):
+        return self.generation_parameters.get('polarization_time')
 
     @property
     def sample_rate(self):
@@ -1354,6 +1374,39 @@ class PredefinedGeneratorBase:
 
         mw_laser_element.laser_on = True
         return mw_laser_element
+
+    def _get_mw_laser_gate_element(self, length, increment, amp=None, freq=None, phase=None):
+        """
+
+        @param length:
+        @param increment:
+        @param amp:
+        @param freq:
+        @param phase:
+        @return:
+        """
+        mw_laser_element = self._get_mw_element(length=length,
+                                                increment=increment,
+                                                amp=amp,
+                                                freq=freq,
+                                                phase=phase)
+        if self.laser_channel.startswith('d'):
+            mw_laser_element.digital_high[self.laser_channel] = True
+        elif self.laser_channel.startswith('a'):
+            mw_laser_element.pulse_function[self.laser_channel] = SamplingFunctions.DC(
+                voltage=self.analog_trigger_voltage)
+
+        mw_laser_element.laser_on = True
+
+        if self.gate_channel:
+            if self.gate_channel.startswith('d'):
+                mw_laser_element.digital_high[self.gate_channel] = True
+            elif self.gate_channel.startswith('a'):
+                mw_laser_element.pulse_function[self.gate_channel] = SamplingFunctions.DC(
+                    voltage=self.analog_trigger_voltage)
+
+        return mw_laser_element
+
 
     def _get_mw_element_linearchirp(self, length, increment, amplitude=None, start_freq=None, stop_freq=None, phase=None):
         """

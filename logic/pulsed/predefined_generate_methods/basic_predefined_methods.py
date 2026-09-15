@@ -1493,6 +1493,249 @@ class BasicPredefinedGenerator(PredefinedGeneratorBase):
         return created_blocks, created_ensembles, created_sequences
 
 
+    def generate_rabi_contrast(self, name='rabiContrastbased', tau_start=10.0e-9, tau_step=10.0e-9, num_of_points=50):
+        """
+
+        """
+        created_blocks = list()
+        created_ensembles = list()
+        created_sequences = list()
+
+        # get tau array for measurement ticks
+        tau_array = tau_start + np.arange(num_of_points) * tau_step
+
+        # create the MW element
+        mw_element = self._get_mw_element(length=tau_start,
+                                          increment=tau_step,
+                                          amp=self.microwave_amplitude,
+                                          freq=self.microwave_frequency,
+                                          phase=0)
+        # create the other elements
+        start_element = self._get_idle_element(length = self.idle_time, #300e-9
+                                                        increment=0.0)
+
+        polarization_element = self._get_laser_element(length=self.polarization_time,
+                                                      increment=0)
+        MWwait_element = self._get_idle_element(length=self.mw_wait_time, increment=0.0)
+
+        laser_wait_element = self._get_laser_element(length=self.wait_time, increment=0.0)
+
+        laser_element = self._get_laser_gate_element(length=self.laser_length / 2,
+                                                         increment=0)
+        laser_only_element = self._get_laser_element(length=self.laser_length / 2,
+                                                         increment=0)
+        laser_delay_element = self._get_laser_gate_element(length=self.laser_delay,
+                                                    increment=0)
+
+
+
+        # Create block and append to created_blocks list
+        rabi_block = PulseBlock(name=name)
+        rabi_block.append(start_element)
+        rabi_block.append(polarization_element)
+        rabi_block.append(MWwait_element)
+        rabi_block.append(mw_element)
+
+        rabi_block.append(laser_wait_element) #some laser wait time before reading
+        rabi_block.append(laser_element)
+        rabi_block.append(laser_only_element)
+        rabi_block.append(laser_delay_element)
+
+        rabi_block.append(self._get_laser_element(length=850e-9, increment=0.0)) #some laser wait time before reading
+        rabi_block.append(laser_element)
+        rabi_block.append(laser_only_element)
+        rabi_block.append(laser_delay_element)
+
+        rabi_block.append(laser_wait_element)
+        created_blocks.append(rabi_block)
+
+        # Create block ensemble
+        block_ensemble = PulseBlockEnsemble(name=name, rotating_frame=False)
+        block_ensemble.append((rabi_block.name, num_of_points - 1))
+
+        # Create and append sync trigger block if needed
+        self._add_trigger(created_blocks=created_blocks, block_ensemble=block_ensemble)
+
+        # add metadata to invoke settings later on
+        block_ensemble.measurement_information['alternating'] = False
+        block_ensemble.measurement_information['laser_ignore_list'] = list()
+        block_ensemble.measurement_information['controlled_variable'] = tau_array
+        block_ensemble.measurement_information['units'] = ('s', '')
+        block_ensemble.measurement_information['labels'] = ('Tau<sub>pulse spacing</sub>', 'Signal')
+        block_ensemble.measurement_information['number_of_lasers'] = num_of_points
+        block_ensemble.measurement_information['counting_length'] = self._get_ensemble_count_length(
+            ensemble=block_ensemble, created_blocks=created_blocks)
+
+        # Append ensemble to created_ensembles list
+        created_ensembles.append(block_ensemble)
+        return created_blocks, created_ensembles, created_sequences
+
+    def generate_ramsey_contrast(self, name='ranseyContrastbased', tau_start=10.0e-9, tau_step=10.0e-9, num_of_points=50):
+        """
+
+        """
+        created_blocks = list()
+        created_ensembles = list()
+        created_sequences = list()
+
+        # get tau array for measurement ticks
+        tau_array = tau_start + np.arange(num_of_points) * tau_step
+
+        # Create free evolution time
+        tau_element = self._get_idle_element(length=tau_start, increment=tau_step)
+
+        # create the MW element
+        mw_element = self._get_mw_element(length=self.rabi_period,
+                                          increment=0,
+                                          amp=self.microwave_amplitude,
+                                          freq=self.microwave_frequency,
+                                          phase=0)
+        # create the other elements
+        start_element = self._get_idle_element(length = self.idle_time, #300e-9
+                                                        increment=0.0)
+
+        polarization_element = self._get_laser_element(length=self.polarization_time,
+                                                      increment=0)
+        MWwait_element = self._get_idle_element(length=self.mw_wait_time, increment=0.0)
+
+        laser_wait_element = self._get_laser_element(length=self.wait_time, increment=0.0)
+
+        laser_element = self._get_laser_gate_element(length=self.laser_length / 2,
+                                                         increment=0)
+        laser_only_element = self._get_laser_element(length=self.laser_length / 2,
+                                                         increment=0)
+        laser_delay_element = self._get_laser_gate_element(length=self.laser_delay,
+                                                    increment=0)
+
+
+
+        # Create block and append to created_blocks list
+        ramsey_block = PulseBlock(name=name)
+        ramsey_block.append(start_element)
+        ramsey_block.append(polarization_element)
+        #####################################
+        ramsey_block.append(MWwait_element)
+        ramsey_block.append(mw_element)
+        ramsey_block.append(MWwait_element)
+        #####################################
+        ramsey_block.append(tau_element)
+        #####################################
+        ramsey_block.append(self._get_trigger_element(length=self.mw_wait_time, increment=0,
+                                                    channels=[self.I_channel, self.Q_channel]))
+        ramsey_block.append(self._get_trigger_element(length=self.rabi_period, increment=0,
+                                                    channels=[self.I_channel, self.Q_channel,
+                                                              self.microwave_channel]))
+        ramsey_block.append(self._get_trigger_element(length=self.mw_wait_time, increment=0,
+                                                    channels=[self.I_channel, self.Q_channel]))
+        #####################################
+        ramsey_block.append(laser_wait_element) #some laser wait time before reading
+        ramsey_block.append(laser_element)
+        ramsey_block.append(laser_only_element)
+        ramsey_block.append(laser_delay_element)
+        #####################################
+        ramsey_block.append(polarization_element)
+        #####################################
+        ramsey_block.append(MWwait_element)
+        ramsey_block.append(mw_element)
+        ramsey_block.append(MWwait_element)
+        #####################################
+        ramsey_block.append(tau_element)
+        #####################################
+        ramsey_block.append(MWwait_element)
+        ramsey_block.append(mw_element)
+        ramsey_block.append(MWwait_element)
+        #####################################
+        ramsey_block.append(laser_wait_element)
+        ramsey_block.append(laser_element)
+        ramsey_block.append(laser_only_element)
+        ramsey_block.append(laser_delay_element)
+        ramsey_block.append(laser_wait_element)
+        #####################################
+        created_blocks.append(ramsey_block)
+
+        # Create block ensemble
+        block_ensemble = PulseBlockEnsemble(name=name, rotating_frame=False)
+        block_ensemble.append((ramsey_block.name, num_of_points - 1))
+
+        # Create and append sync trigger block if needed
+        self._add_trigger(created_blocks=created_blocks, block_ensemble=block_ensemble)
+
+        # add metadata to invoke settings later on
+        block_ensemble.measurement_information['alternating'] = False
+        block_ensemble.measurement_information['laser_ignore_list'] = list()
+        block_ensemble.measurement_information['controlled_variable'] = tau_array
+        block_ensemble.measurement_information['units'] = ('s', '')
+        block_ensemble.measurement_information['labels'] = ('Tau<sub>pulse spacing</sub>', 'Signal')
+        block_ensemble.measurement_information['number_of_lasers'] = num_of_points
+        block_ensemble.measurement_information['counting_length'] = self._get_ensemble_count_length(
+            ensemble=block_ensemble, created_blocks=created_blocks)
+
+        # Append ensemble to created_ensembles list
+        created_ensembles.append(block_ensemble)
+        return created_blocks, created_ensembles, created_sequences
+    def generate_CW_odmr_contrast(self, name='cwODMRContrastbased'):
+        """
+
+        """
+        created_blocks = list()
+        created_ensembles = list()
+        created_sequences = list()
+
+        # create the elements
+        start_element = self._get_laser_element(length=self.wait_time, increment=0.0)
+        laser_gate_element = self._get_laser_gate_element(length=self.laser_length / 2,
+                                                         increment=0)
+        laser_element = self._get_laser_element(length=self.laser_length / 2,
+                                                         increment=0)
+        laser_gate_delay_element = self._get_laser_gate_element(length=self.laser_delay,
+                                                    increment=0)
+        laser_delay_element = self._get_laser_element(length=self.laser_delay, increment=0)
+
+        # create the laser_mw element
+        start_mw_element = self._get_mw_laser_element(length=self.wait_time, increment=0.0)
+        mw_laser_gate_element = self._get_mw_laser_gate_element(length=self.laser_length / 2, increment=0)
+        mw_laser_element = self._get_mw_laser_element(length=self.laser_length / 2, increment=0)
+        mw_laser_gate_delay_element = self._get_mw_laser_gate_element(length=self.laser_delay, increment=0)
+        mw_laser_delay_element = self._get_mw_laser_element(length=self.laser_delay, increment=0)
+
+
+        # Create block and append to created_blocks list
+        odmr_block = PulseBlock(name=name)
+        odmr_block.append(start_element)  # JSS: forgot this one, but why would it make any difference
+        odmr_block.append(laser_gate_element)
+        odmr_block.append(laser_element)
+        odmr_block.append(laser_gate_delay_element)
+        odmr_block.append(laser_delay_element)
+
+        odmr_block.append(start_mw_element)
+        odmr_block.append(mw_laser_gate_element)
+        odmr_block.append(mw_laser_element)
+        odmr_block.append(mw_laser_gate_delay_element)
+        odmr_block.append(mw_laser_delay_element)
+        created_blocks.append(odmr_block)
+
+        # Create block ensemble
+        block_ensemble = PulseBlockEnsemble(name=name, rotating_frame=False)
+        block_ensemble.append((odmr_block.name, num_of_points - 1))
+
+        # Create and append sync trigger block if needed
+        self._add_trigger(created_blocks=created_blocks, block_ensemble=block_ensemble)
+
+        # add metadata to invoke settings later on
+        block_ensemble.measurement_information['alternating'] = False
+        block_ensemble.measurement_information['laser_ignore_list'] = list()
+        block_ensemble.measurement_information['controlled_variable'] = np.zeros(1)
+        block_ensemble.measurement_information['units'] = ('s', '')
+        block_ensemble.measurement_information['labels'] = ('Tau<sub>pulse spacing</sub>', 'Signal')
+        block_ensemble.measurement_information['number_of_lasers'] = num_of_points
+        block_ensemble.measurement_information['counting_length'] = self._get_ensemble_count_length(
+            ensemble=block_ensemble, created_blocks=created_blocks)
+
+        # Append ensemble to created_ensembles list
+        created_ensembles.append(block_ensemble)
+        return created_blocks, created_ensembles, created_sequences
+
+
     def generate_t1_exponential_contrast_random(self, name='T1_exp_contrastbased', tau_start=1.0e-6, tau_end=1.0e-6,
                                 num_of_points=50, alternating=False):
         """

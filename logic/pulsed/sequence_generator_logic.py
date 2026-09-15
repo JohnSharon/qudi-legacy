@@ -80,16 +80,21 @@ class SequenceGeneratorLogic(GenericLogic):
     # status vars
     # Global parameters describing the channel usage and common parameters used during pulsed object
     # generation for predefined methods.
-    _generation_parameters = StatusVar(default=OrderedDict([('laser_channel', 'd_ch1'),
+    _generation_parameters = StatusVar(default=OrderedDict([('laser_channel', 'd_ch4'),
                                                             ('sync_channel', ''),
-                                                            ('gate_channel', ''),
-                                                            ('microwave_channel', 'a_ch1'),
+                                                            ('gate_channel', 'c_ch1'),
+                                                            ('I_channel', 'd_ch7'),
+                                                            ('Q_channel', 'd_ch3'),
+                                                            ('microwave_channel', 'd_ch2'),
                                                             ('microwave_frequency', 2.87e9),
                                                             ('microwave_amplitude', 0.0),
                                                             ('rabi_period', 100e-9),
+                                                            ('idle_time', 1000e-9),
                                                             ('laser_length', 150e-9),
                                                             ('laser_delay', 850e-9),
-                                                            ('wait_time', 300e-9),                                                        ('polarization_time', 100e-6),
+                                                            ('wait_time', 300e-9),
+                                                            ('mw_wait_time', 300e-9),
+                                                            ('polarization_time', 100e-6),
                                                             ('analog_trigger_voltage', 0.0)]))
 
     # The created pulse objects (PulseBlock, PulseBlockEnsemble, PulseSequence) are saved in

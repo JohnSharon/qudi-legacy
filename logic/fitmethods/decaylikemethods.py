@@ -231,11 +231,11 @@ def make_decayexponential_fit(self, x_axis, data, estimator, units=None, add_par
 
     result_str_dict = dict()  # create result string for gui
 
-    result_str_dict['Amplitude'] = {'value': result.params['amplitude'].value,
+    result_str_dict['Contrast'] = {'value': result.params['amplitude'].value,
                                     'error': result.params['amplitude'].stderr,
                                     'unit': units[1]}  # amplitude
 
-    result_str_dict['Lifetime'] = {'value': result.params['lifetime'].value,
+    result_str_dict['T1'] = {'value': result.params['lifetime'].value,
                                    'error': result.params['lifetime'].stderr,
                                    'unit': units[0]}  # lifetime
 
@@ -243,6 +243,7 @@ def make_decayexponential_fit(self, x_axis, data, estimator, units=None, add_par
                                  'error': result.params['offset'].stderr,
                                  'unit': units[1]}  # offset
 
+    result_str_dict['R^2'] = {'value': R_squared(data, result), 'error': 0, 'unit': ''}
     result.result_str_dict = result_str_dict
 
     return result
@@ -582,3 +583,13 @@ def estimate_biexponential(self, x_axis, data, params):
     params['offset'].set(value=offset)
 
     return error, params
+
+
+def R_squared(data, result):
+    data_fit = result.best_fit
+    residuals = data - data_fit
+
+    SS_res = np.sum(residuals ** 2)
+    SS_tot = np.sum((data - np.mean(data)) ** 2)
+    R_squared = 1 - SS_res / SS_tot
+    return R_squared
